@@ -30,6 +30,8 @@ macro_rules! add_font {
     };
 }
 
+pub struct Img;
+
 type BoxedWindow = Box<dyn Window + Send + Sync>;
 pub struct Gui {
     pub context: egui::Context,
