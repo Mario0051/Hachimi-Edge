@@ -1,53 +1,64 @@
-use crate::core::interceptor::HookHandle;
-use crate::core::Error;
-use std::ffi::c_void;
-use std::ptr;
+use crate::core::interceptor::{Interceptor, InterceptorError};
+use std::ffi::CString;
 
 pub struct IosInterceptor;
 
-pub unsafe fn hook(orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
-    let trampoline = dobby_rs::hook(
-        orig_addr as *mut c_void,
-        hook_addr as *mut c_void
-    )?;
-    Ok(trampoline as usize)
-}
+impl Interceptor for IosInterceptor {
+    fn hook(&self, target: usize, detour: usize) -> Result<usize, InterceptorError> {
+        let mut trampoline = 0;
+        let result = unsafe {
+            dobby_rs::hook(
+                target as *mut _,
+                detour as *mut _,
+                &mut trampoline as *mut _ as *mut *mut _,
+            )
+        };
 
-pub unsafe fn hook_vtable(
-    vtable: *mut usize,
-    vtable_index: usize,
-    hook_addr: usize,
-) -> Result<HookHandle, Error> {
-    let hook_target_ptr = vtable.add(vtable_index);
+        if result == dobby_rs::dobby_errno::DOBBY_SUCCESS {
+            Ok(trampoline)
+        } else {
+            error!("Dobby hook failed with code: {}", result);
+            Err(InterceptorError::Other)
+        }
+    }
 
-    let orig_addr = ptr::read(hook_target_ptr);
+    fn unhook(&self, target: usize) {
+        let result = unsafe { dobby_rs::unhook(target as *mut _) };
+        if result != dobby_rs::dobby_errno::DOBBY_SUCCESS {
+            error!("Dobby unhook failed with code: {}", result);
+        }
+    }
 
-    let trampoline_addr = hook(orig_addr, hook_addr)?;
-
-    let handle = HookHandle {
-        orig_addr,
-        trampoline_addr,
-        hook_type: crate::core::interceptor::HookType::Vtable,
-    };
-
-    Ok(handle)
-}
-
-pub fn unhook(hook: &HookHandle) {
-    if let Err(e) = unsafe { dobby_rs::unhook(hook.orig_addr as *mut c_void) } {
-        error!("Failed to unhook function at {:#x}: {}", hook.orig_addr, e);
+    fn unhook_all(&self) {
+        warn!("Interceptor::unhook_all() is not implemented for iOS");
     }
 }
 
-pub fn unhook_vtable(hook: &HookHandle) {
-    unhook(hook)
-}
+pub fn find_symbol_by_name(image_name: &str, symbol_name: &str) -> usize {
+    let c_symbol_name = match CString::new(symbol_name) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to create CString for symbol {}: {}", symbol_name, e);
+            return 0;
+        }
+    };
 
-pub unsafe fn get_vtable_from_instance(instance_addr: usize) -> *mut usize {
-    ptr::read(instance_addr as *const *mut usize)
-}
+    //
 
-pub unsafe fn find_symbol_by_name(_module: &str, symbol: &str) -> usize {
-    let handle = ptr::null_mut(); 
-    super::symbols_impl::dlsym(handle, symbol)
+    if image_name != "UnityFramework" {
+         warn!("find_symbol_by_name called for unhandled image: {}", image_name);
+         return 0;
+    }
+
+    let addr = unsafe {
+        libc::dlsym(libc::RTLD_DEFAULT, c_symbol_name.as_ptr())
+    };
+
+    if addr.is_null() {
+        error!("Failed to find symbol '{}' in any loaded image.", symbol_name);
+        0
+    } else {
+        info!("Found symbol '{}' at address {:p}", symbol_name, addr);
+        addr as usize
+    }
 }
