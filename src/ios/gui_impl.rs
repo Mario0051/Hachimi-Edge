@@ -1,3 +1,5 @@
+mod input_hook;
+
 use crate::core::gui::Gui;
 use egui_wgpu::Renderer as EguiRenderer;
 use objc::{msg_send, sel, sel_impl, runtime::Object};
@@ -41,6 +43,8 @@ pub struct IosGui;
 pub fn init() {
     info!("Initializing GUI...");
     super::hook::setup_render_hook();
+
+    input_hook::init();
 }
 
 pub fn render_frame(gui: &mut Gui, drawable: *mut c_void) {
