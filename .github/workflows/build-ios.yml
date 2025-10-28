@@ -1,0 +1,48 @@
+name: Build iOS
+
+on:
+  workflow_dispatch
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install Rust nightly toolchain
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rust-src
+
+    - name: Add aarch64-apple-ios target
+      run: rustup target add aarch64-apple-ios
+
+    - name: Cache Cargo dependencies (rust-cache)
+      uses: swatinem/rust-cache@v2
+
+    - name: Build for iOS
+      run: |
+        export SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+
+        export RUSTFLAGS="\
+         -C link-arg=-isysroot \
+         -C link-arg=$SDKROOT \
+         -C link-arg=-miphoneos-version-min=13.0 \
+         -C link-arg=-lc++ \
+         -C link-arg=-framework \
+         -C link-arg=Security \
+         -C link-arg=-framework \
+         -C link-arg=CoreFoundation \
+         -C link-arg=-Wl,-interposable \
+         -C link-arg=-Wl,-U,_dlopen"
+
+        CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$(xcrun --find clang) \
+        CARGO_INCREMENTAL=0 \
+        cargo build --target aarch64-apple-ios --verbose
