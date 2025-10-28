@@ -8,25 +8,22 @@ pub unsafe extern "C" fn dlopen(path: *const i8, mode: i32) -> *mut c_void {
     let real_dlopen: extern "C" fn(*const i8, i32) -> *mut c_void =
         std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _));
 
+    STARTUP_ONCE.call_once(|| {
+        eprintln!("[Hachimi-iOS] Intercepted dlopen, initializing synchronously...");
+        initialize_hachimi();
+    });
+
     let handle = real_dlopen(path, mode);
-
-    if !path.is_null() {
-        let path_str = CStr::from_ptr(path).to_string_lossy();
-
-        if path_str.contains("UnityFramework") {
-            STARTUP_ONCE.call_once(|| {
-                std::thread::spawn(initialize_hachimi);
-            });
-        }
-    }
-
     handle
 }
 
 fn initialize_hachimi() {
     super::log_impl::init(log::LevelFilter::Info);
+
+    info!("Hachimi synchronous initialization started...");
+
     crate::core::init(
-        Box::new(super::log_impl::IosLog),
+        Box::new(super::log_impl::IosLog::new()),
         Box::new(super::hachimi_impl::IosHachimi),
         Box::new(super::game_impl::IosGame),
         Box::new(super::gui_impl::IosGui),
