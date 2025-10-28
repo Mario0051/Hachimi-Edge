@@ -12,6 +12,13 @@ type TouchesBeganFn = unsafe extern "C" fn(this: *mut Object, sel: Sel, touches:
 
 static ORIG_TOUCHES_BEGAN: OnceCell<TouchesBeganFn> = OnceCell::new();
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
 unsafe extern "C" fn on_touches_began(
     this: *mut Object,
     sel: Sel,
@@ -36,36 +43,39 @@ unsafe extern "C" fn on_touches_began(
         }
 
         if gui.is_consuming_input() {
-            let all_touches: *mut Object = msg_send![touches, allObjects];
-            let count: usize = msg_send![all_touches, count];
 
             for i in 0..count {
                 let touch: *mut Object = msg_send![all_touches, objectAtIndex: i];
-                let pos = Pos2::ZERO;
+
+                let location: CGPoint = msg_send![touch, locationInView: this];
+                let pos = Pos2::new(location.x as f32, location.y as f32);
 
                 let phase: i64 = msg_send![touch, phase];
 
-                match phase {
-                    0 => {
-                        gui.input.events.push(egui::Event::PointerButton {
-                            pos,
-                            button: PointerButton::Primary,
-                            pressed: true,
-                            modifiers: egui::Modifiers::NONE,
-                        });
+                if i == 0 {
+                    match phase {
+                        0 => {
+                            gui.input.events.push(egui::Event::PointerButton {
+                                pos,
+                                button: PointerButton::Primary,
+                                pressed: true,
+                                modifiers: egui::Modifiers::NONE,
+                            });
+                        }
+                        1 => {
+                            gui.input.events.push(egui::Event::PointerMoved(pos));
+                        }
+                        3 | 4 => {
+                            gui.input.events.push(egui::Event::PointerButton {
+                                pos,
+                                button: PointerButton::Primary,
+                                pressed: false,
+                                modifiers: egui::Modifiers::NONE,
+                            });
+                            gui.input.events.push(egui::Event::PointerGone);
+                        }
+                        _ => {}
                     }
-                    1 => {
-                        gui.input.events.push(egui::Event::PointerMoved(pos));
-                    }
-                    3 | 4 => {
-                        gui.input.events.push(egui::Event::PointerButton {
-                            pos,
-                            button: PointerButton::Primary,
-                            pressed: false,
-                            modifiers: egui::Modifiers::NONE,
-                        });
-                    }
-                    _ => {}
                 }
             }
 
