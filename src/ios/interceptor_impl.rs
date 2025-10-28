@@ -1,7 +1,9 @@
-use crate::core::error::Error;
+use crate::core::Error;
 use crate::core::interceptor::HookHandle;
 use std::ffi::{c_void, CString};
 use std::ptr;
+
+pub struct IosInterceptor;
 
 pub unsafe fn hook(orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
     let trampoline = dobby_rs::hook(
