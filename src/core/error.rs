@@ -1,4 +1,5 @@
 use std::fmt;
+use dobby_rs::DobbyHookError;
 
 #[derive(Debug)]
 pub enum Error {
@@ -92,5 +93,11 @@ impl From<ureq::Error> for Error {
 impl From<zip::result::ZipError> for Error {
     fn from(e: zip::result::ZipError) -> Self {
         Error::ZipError(e)
+    }
+}
+
+impl From<DobbyHookError> for Error {
+    fn from(e: DobbyHookError) -> Self {
+        Error::HookingError(e.to_string())
     }
 }

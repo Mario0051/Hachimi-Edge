@@ -31,7 +31,7 @@ sqlparser = "0.43"
 textwrap = "0.16"
 atomic_float = "0.1"
 blake3 = "1.5"
-ureq = { version = "2.10", features = ["json"] }
+ureq = { version = "2.10", default-features = false, features = ["native-tls", "json"] }
 size = "0.4"
 threadpool = "1.8"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
@@ -49,10 +49,18 @@ glow = "0.13"
 dobby-rs = "0.1"
 
 [target.'cfg(target_os = "ios")'.dependencies]
-egui-wgpu = { version = "0.33", default-features = false }
-wgpu = { version = "27.0.1", default-features = false, features = ["metal"] }
+egui-wgpu = { version = "0.27" }
+wgpu = { version = "0.19", features = ["metal"] }
+
+raw-window-handle = "0.6.2"
+pollster = "0.4"
+
+objc = "0.2.7"
 objc2 = "0.6.3"
-metal = "0.32"
+objc2-foundation = { version = "0.3.2", features = ["NSBundle", "NSFileManager", "NSString", "NSURL"] }
+objc2-ui-kit = { version = "0.3.2", features = ["UIView", "UIResponder", "UIViewController"] }
+objc2-quartz-core = { version = "0.3.2", features = ["CAMetalLayer"] }
+
 dobby-rs = "0.1"
 ctor = "0.6"
 libc = "0.2"
@@ -92,5 +100,5 @@ ProductName = "Hachimi"
 FileDescription = "Game enhancement and translation mod"
 
 [patch.crates-io]
-dobby-sys = { git = "https://github.com/Mario0051/dobby-sys.git", rev = "b59caaf324a0a5cbefeaf69479157c2175a49695" }
+dobby-sys = { git = "https://github.com/Mario0051/dobby-sys.git", rev = "3d82df4438bc790d0ad449f3f49a807e969cb11b" }
 embed-resource = { git = "https://github.com/nabijaczleweli/rust-embed-resource.git", rev = "e98e9aa28d66b0c2ff43516b41847cac372310dd" }
