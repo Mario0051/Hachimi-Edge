@@ -1,6 +1,6 @@
-use crate::core::log::Log;
+use crate::core::Log;
 use log::{Level, Log as OtherLog, Metadata, Record};
-use oslog::{level::LogLevel, OsLog};
+use oslog::{LogLevel, OsLog};
 
 pub struct IosLog {
     logger: OsLog,
@@ -44,7 +44,7 @@ pub fn init(level: log::LevelFilter) {
         logger.error(&format!("PANIC: {}", panic_info));
     }));
 
-    info!("iOS oslog logger initialized.");
+    info!("iOS os_log logger initialized.");
 }
 
 impl Log for IosLog {
