@@ -1,6 +1,6 @@
-use crate::core::Log;
+use crate::core::log::Log;
 use log::{Level, Log as OtherLog, Metadata, Record};
-use oslog::{LogLevel, OsLog};
+use oslog::{sys, OsLog};
 
 pub struct IosLog {
     logger: OsLog,
@@ -21,11 +21,11 @@ impl OtherLog for IosLog {
 
     fn log(&self, record: &Record) {
         let level = match record.level() {
-            Level::Error => LogLevel::Error,
-            Level::Warn => LogLevel::Error,
-            Level::Info => LogLevel::Info,
-            Level::Debug => LogLevel::Debug,
-            Level::Trace => LogLevel::Debug,
+            Level::Error => sys::OS_LOG_TYPE_ERROR,
+            Level::Warn => sys::OS_LOG_TYPE_DEFAULT,
+            Level::Info => sys::OS_LOG_TYPE_INFO,
+            Level::Debug => sys::OS_LOG_TYPE_DEBUG,
+            Level::Trace => sys::OS_LOG_TYPE_DEBUG,
         };
 
         self.logger.log(level, &format!("{}", record.args()));
@@ -34,14 +34,14 @@ impl OtherLog for IosLog {
     fn flush(&self) {}
 }
 
-pub fn init(level: log::LevelFilter) {
+pub fn init(level: log.LevelFilter) {
     let logger = IosLog::new();
     log::set_boxed_logger(Box::new(logger)).unwrap();
     log::set_max_level(level);
 
     std::panic::set_hook(Box::new(|panic_info| {
         let logger = OsLog::new("com.hachimi-edge.mod", "panic");
-        logger.error(&format!("PANIC: {}", panic_info));
+        logger.log(sys::OS_LOG_TYPE_ERROR, &format!("PANIC: {}", panic_info));
     }));
 
     info!("iOS os_log logger initialized.");
@@ -49,12 +49,12 @@ pub fn init(level: log::LevelFilter) {
 
 impl Log for IosLog {
     fn info(&self, s: &str) {
-        self.logger.info("%{public}s", s);
+        self.logger.log(sys::OS_LOG_TYPE_INFO, s);
     }
     fn warn(&self, s: &str) {
-        self.logger.error("%{public}s", s);
+        self.logger.log(sys::OS_LOG_TYPE_DEFAULT, s);
     }
     fn error(&self, s: &str) {
-        self.logger.error("%{public}s", s);
+        self.logger.log(sys::OS_LOG_TYPE_ERROR, s);
     }
 }
