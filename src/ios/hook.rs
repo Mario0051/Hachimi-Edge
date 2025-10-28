@@ -12,6 +12,9 @@ unsafe extern "C" fn on_present(this: *mut c_void, timer: *mut c_void, drawable:
         orig(this, timer, drawable);
     }
 
+    let gui_mutex = Gui::instance_or_init("IOS_OPEN_KEY");
+    let mut gui = gui_mutex.lock().unwrap();
+
     if let Some(gui_mutex) = Gui::instance() {
         let mut gui = gui_mutex.lock().unwrap();
 
