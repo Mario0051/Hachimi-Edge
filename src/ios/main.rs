@@ -33,4 +33,15 @@ fn initialize_hachimi() {
         Box::new(super::interceptor_impl::IosInterceptor),
         Box::new(super::symbols_impl::IosSymbols),
     );
+
+    info!("Hachimi platform implementations set. Initializing Hachimi core...");
+    if !crate::core::Hachimi::init() {
+        error!("Failed to initialize Hachimi core");
+        return;
+    }
+
+    info!("Hachimi core initialized. Setting up render hook...");
+    super::hook::setup_render_hook();
+
+    info!("iOS initialization complete.");
 }
