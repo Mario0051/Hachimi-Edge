@@ -34,7 +34,7 @@ jobs:
         export RUSTFLAGS="\
          -C link-arg=-isysroot \
          -C link-arg=$SDKROOT \
-         -C link-arg=-miphoneos-version-min=13.0 \
+         -C link-arg=-miphoneos-version-min=13.2 \
          -C link-arg=-lc++ \
          -C link-arg=-framework \
          -C link-arg=Security \
