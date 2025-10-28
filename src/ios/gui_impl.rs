@@ -41,7 +41,6 @@ pub struct IosGui;
 pub fn init() {
     info!("Initializing GUI...");
     super::hook::setup_render_hook();
-
     super::input_hook::init();
 }
 
@@ -53,10 +52,6 @@ pub fn render_frame(gui: &mut Gui, drawable: *mut c_void) {
     });
     let mut renderer = renderer.lock().unwrap();
 
-    if !gui.visible {
-        return;
-    }
-    
     renderer.render(gui);
 }
 
@@ -148,7 +143,9 @@ impl Renderer {
         };
 
         let texture_view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let full_output = gui.run();
+
+        let full_output = gui.run(); 
+
         let clipped_primitives = gui.context.tessellate(full_output.shapes, gui.context.pixels_per_point());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Egui Encoder") });
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
