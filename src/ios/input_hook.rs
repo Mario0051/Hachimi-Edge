@@ -47,7 +47,12 @@ unsafe extern "C" fn on_touches_began(
             for i in 0..count {
                 let touch: *mut Object = msg_send![all_touches, objectAtIndex: i];
 
-                let location: CGPoint = msg_send![touch, locationInView: this];
+                let window: *mut Object = msg_send![touch, window];
+                if window.is_null() {
+                    continue;
+                }
+
+                let location: CGPoint = msg_send![touch, locationInView: window];
                 let pos = Pos2::new(location.x as f32, location.y as f32);
 
                 let phase: i64 = msg_send![touch, phase];
