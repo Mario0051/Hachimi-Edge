@@ -1,5 +1,3 @@
-mod input_hook;
-
 use crate::core::gui::Gui;
 use egui_wgpu::Renderer as EguiRenderer;
 use objc::{msg_send, sel, sel_impl, runtime::Object};
@@ -44,7 +42,7 @@ pub fn init() {
     info!("Initializing GUI...");
     super::hook::setup_render_hook();
 
-    input_hook::init();
+    super::input_hook::init();
 }
 
 pub fn render_frame(gui: &mut Gui, drawable: *mut c_void) {
@@ -54,6 +52,11 @@ pub fn render_frame(gui: &mut Gui, drawable: *mut c_void) {
         Mutex::new(renderer)
     });
     let mut renderer = renderer.lock().unwrap();
+
+    if !gui.visible {
+        return;
+    }
+    
     renderer.render(gui);
 }
 
@@ -165,7 +168,7 @@ impl Renderer {
                     view: &texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations { 
-                        load: wgpu::LoadOp::Load, 
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store 
                     },
                 })],
