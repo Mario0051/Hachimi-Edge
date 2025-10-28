@@ -40,8 +40,8 @@ fn initialize_hachimi() {
         return;
     }
 
-    info!("Hachimi core initialized. Setting up render hook...");
-    super::hook::setup_render_hook();
+    info!("Hachimi core initialized. Initializing iOS GUI hooks...");
+    super::gui_impl::init();
 
     info!("iOS initialization complete.");
 }
