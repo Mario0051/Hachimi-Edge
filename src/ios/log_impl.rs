@@ -1,29 +1,60 @@
-use log::{self, LevelFilter, Log, Metadata, Record};
+use crate::core::log::Log;
+use log::{Level, Log as OtherLog, Metadata, Record};
+use os_log::{level::LogLevel, OsLog};
 
-pub struct IosLog;
+pub struct IosLog {
+    logger: OsLog,
+}
 
-struct IosLogger;
+impl IosLog {
+    pub fn new() -> IosLog {
+        IosLog {
+            logger: OsLog::new("com.hachimi-edge.mod", "default"),
+        }
+    }
+}
 
-impl Log for IosLogger {
+impl OtherLog for IosLog {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
     }
 
     fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            println!("[{} Hachimi-iOS] {}", record.level(), record.args());
-        }
+        let level = match record.level() {
+            Level::Error => LogLevel::Error,
+            Level::Warn => LogLevel::Error,
+            Level::Info => LogLevel::Info,
+            Level::Debug => LogLevel::Debug,
+            Level::Trace => LogLevel::Debug,
+        };
+
+        self.logger.log(level, &format!("{}", record.args()));
     }
 
     fn flush(&self) {}
 }
 
-static LOGGER: IosLogger = IosLogger;
+pub fn init(level: log::LevelFilter) {
+    let logger = IosLog::new();
+    log::set_boxed_logger(Box::new(logger)).unwrap();
+    log::set_max_level(level);
 
-pub fn init(filter_level: LevelFilter) {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(filter_level))
-        .expect("Failed to initialize Hachimi logger");
+    std::panic::set_hook(Box::new(|panic_info| {
+        let logger = OsLog::new("com.hachimi-edge.mod", "panic");
+        logger.error(&format!("PANIC: {}", panic_info));
+    }));
 
-    log::info!("iOS Logger initialized.");
+    info!("iOS os_log logger initialized.");
+}
+
+impl Log for IosLog {
+    fn info(&self, s: &str) {
+        self.logger.info("%{public}s", s);
+    }
+    fn warn(&self, s: &str) {
+        self.logger.error("%{public}s", s);
+    }
+    fn error(&self, s: &str) {
+        self.logger.error("%{public}s", s);
+    }
 }
