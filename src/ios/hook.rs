@@ -22,7 +22,7 @@ pub fn setup_render_hook() {
     let target_fn_addr = unsafe {
         super::interceptor_impl::find_symbol_by_name(
             "UnityFramework",
-            "UnityPresentsTimerAndDrawable"
+            "_UnityPresentsTimerAndDrawable"
         )
     };
 
