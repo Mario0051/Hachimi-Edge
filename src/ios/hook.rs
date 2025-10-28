@@ -16,14 +16,6 @@ unsafe extern "C" fn on_present(this: *mut c_void, timer: *mut c_void, drawable:
     let mut gui = gui_mutex.lock().unwrap();
 
     super::gui_impl::render_frame(&mut gui, drawable);
-
-    /* This is the old, non-working code:
-    if let Some(gui_mutex) = Gui::instance() {
-        let mut gui = gui_mutex.lock().unwrap();
-
-        super::gui_impl::render_frame(&mut gui, drawable);
-    }
-    */
 }
 
 pub fn setup_render_hook() {
