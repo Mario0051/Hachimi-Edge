@@ -27,15 +27,15 @@ unsafe extern "C" fn on_touches_began(
         if count == 3 {
             let touch: *mut Object = msg_send![all_touches, objectAtIndex: 0];
             let phase: i64 = msg_send![touch, phase];
-            
+
             if phase == 0 {
                 info!("3-finger tap detected. Toggling GUI.");
-                gui.visible = !gui.visible;
+                gui.toggle_menu();
                 return; 
             }
         }
 
-        if gui.visible {
+        if gui.is_consuming_input() {
             let all_touches: *mut Object = msg_send![touches, allObjects];
             let count: usize = msg_send![all_touches, count];
 
@@ -47,13 +47,23 @@ unsafe extern "C" fn on_touches_began(
 
                 match phase {
                     0 => {
-                        gui.context.feed_pointer_button_event(PointerButton::Primary, true, pos);
+                        gui.input.events.push(egui::Event::PointerButton {
+                            pos,
+                            button: PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        });
                     }
                     1 => {
-                        gui.context.feed_pointer_motion_event(pos);
+                        gui.input.events.push(egui::Event::PointerMoved(pos));
                     }
                     3 | 4 => {
-                        gui.context.feed_pointer_button_event(PointerButton::Primary, false, pos);
+                        gui.input.events.push(egui::Event::PointerButton {
+                            pos,
+                            button: PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::NONE,
+                        });
                     }
                     _ => {}
                 }
