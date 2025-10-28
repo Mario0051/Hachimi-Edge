@@ -1,4 +1,4 @@
-use crate::core::Log;
+use crate::core::log::Log;
 use log::{Level, Log as OtherLog, Metadata, Record};
 use oslog::OsLog;
 
