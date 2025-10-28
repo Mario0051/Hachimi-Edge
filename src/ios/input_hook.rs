@@ -1,5 +1,7 @@
 use crate::core::gui::Gui;
+use egui::{PointerButton, Pos2};
 use objc::{
+    msg_send,
     runtime::{Class, Object, Sel},
     sel, sel_impl,
 };
@@ -22,20 +24,41 @@ unsafe extern "C" fn on_touches_began(
         let all_touches: *mut Object = msg_send![touches, allObjects];
         let count: usize = msg_send![all_touches, count];
 
-        if count == 3 && !gui.is_visible() {
+        if count == 3 {
             let touch: *mut Object = msg_send![all_touches, objectAtIndex: 0];
             let phase: i64 = msg_send![touch, phase];
             
             if phase == 0 {
                 info!("3-finger tap detected. Toggling GUI.");
-                gui.on_touch(true, 0.0, 0.0);
-                gui.on_touch(false, 0.0, 0.0);
-                
+                gui.visible = !gui.visible;
                 return; 
             }
         }
 
-        if gui.is_visible() {
+        if gui.visible {
+            let all_touches: *mut Object = msg_send![touches, allObjects];
+            let count: usize = msg_send![all_touches, count];
+
+            for i in 0..count {
+                let touch: *mut Object = msg_send![all_touches, objectAtIndex: i];
+                let pos = Pos2::ZERO;
+
+                let phase: i64 = msg_send![touch, phase];
+
+                match phase {
+                    0 => {
+                        gui.context.feed_pointer_button_event(PointerButton::Primary, true, pos);
+                    }
+                    1 => {
+                        gui.context.feed_pointer_motion_event(pos);
+                    }
+                    3 | 4 => {
+                        gui.context.feed_pointer_button_event(PointerButton::Primary, false, pos);
+                    }
+                    _ => {}
+                }
+            }
+
             return;
         }
     }
@@ -49,14 +72,16 @@ pub fn init() {
     info!("Initializing iOS input hook...");
 
     unsafe {
-        let class = Class::get("UIView");
-        if class.is_null() {
-            error!("Failed to find UIView class. Input hooking will not work.");
-            return;
-        }
+        let class = match Class::get("UIView") {
+            Some(c) => c,
+            None => {
+                error!("Failed to find UIView class. Input hooking will not work.");
+                return;
+            }
+        };
 
         let sel = sel!(touchesBegan:withEvent:);
-        let method = class_getInstanceMethod(class, sel);
+        let method = class_getInstanceMethod(class, sel); 
         if method.is_null() {
             error!("Failed to find method touchesBegan:withEvent: on UIView.");
             return;
