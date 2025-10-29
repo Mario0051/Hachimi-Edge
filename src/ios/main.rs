@@ -1,5 +1,7 @@
 use std::ffi::{c_void, CStr};
 use std::sync::Once;
+use std::fs::File;
+use std::io::Write;
 
 static STARTUP_ONCE: Once = Once::new();
 
