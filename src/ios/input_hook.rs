@@ -1,23 +1,14 @@
 use crate::core::gui::Gui;
 use egui::{PointerButton, Pos2};
-use objc::{
-    msg_send,
-    runtime::{Class, Object, Sel},
-    sel, sel_impl,
-};
+use objc2::{msg_send, sel};
+use objc2::runtime::{Class, Method, Object, Sel};
+use objc2_foundation::CGPoint;
 use once_cell::sync::OnceCell;
 use std::ffi::c_void;
 
 type TouchesBeganFn = unsafe extern "C" fn(this: *mut Object, sel: Sel, touches: *mut Object, event: *mut Object);
 
 static ORIG_TOUCHES_BEGAN: OnceCell<TouchesBeganFn> = OnceCell::new();
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGPoint {
-    pub x: f64,
-    pub y: f64,
-}
 
 unsafe extern "C" fn on_touches_began(
     this: *mut Object,
@@ -106,14 +97,18 @@ pub fn init() {
         };
 
         let sel = sel!(touchesBegan:withEvent:);
-        let method = class_getInstanceMethod(class, sel); 
-        if method.is_null() {
-            error!("Failed to find method touchesBegan:withEvent: on UIView.");
-            return;
-        }
+
+        let method: *const Method = match class.instance_method(sel) {
+            Some(m) => m,
+            None => {
+                error!("Failed to find method touchesBegan:withEvent: on UIView.");
+                return;
+            }
+        };
+
+        let target_fn_addr: usize = std::mem::transmute((*method).implementation());
 
         let hachimi = crate::core::Hachimi::instance();
-        let target_fn_addr: usize = std::mem::transmute(method_getImplementation(method));
 
         match hachimi.interceptor.hook(target_fn_addr, on_touches_began as usize) {
             Ok(trampoline) => {
@@ -125,10 +120,4 @@ pub fn init() {
             }
         }
     }
-}
-
-#[link(name = "Foundation", kind = "framework")]
-extern "C" {
-    fn class_getInstanceMethod(cls: *const Class, sel: Sel) -> *mut c_void;
-    fn method_getImplementation(method: *mut c_void) -> *mut c_void;
 }

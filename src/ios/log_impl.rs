@@ -5,12 +5,13 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::path::PathBuf;
 
-use objc::rc::autoreleasepool;
+use objc2::rc::autoreleasepool; 
 
 use objc2_foundation::{
-    NSSearchPathForDirectoriesInDomains, 
+    NSFileManager,
     NSSearchPathDirectory, 
     NSSearchPathDomainMask,
+    NSString,
 };
 
 struct SimpleFileLogger {
@@ -41,35 +42,35 @@ impl OtherLog for SimpleFileLogger {
 }
 
 fn get_documents_directory() -> Option<PathBuf> {
-    autoreleasepool(|| {
-        let dirs = unsafe {
-            NSSearchPathForDirectoriesInDomains(
-                NSSearchPathDirectory::DocumentDirectory,
-                NSSearchPathDomainMask::UserDomainMask,
-                true,
-            )
-        };
+    autoreleasepool(|pool| {
+        let file_manager = NSFileManager::defaultManager();
 
-        let dir = dirs.firstObject()?;
+        let urls = file_manager.URLsForDirectory_inDomain(
+            NSSearchPathDirectory::DocumentDirectory,
+            NSSearchPathDomainMask::UserDomainMask,
+        );
 
-        let path_str = dir.to_string();
+        let dir_url = urls.firstObject()?;
 
-        Some(PathBuf::from(path_str))
+        let path_string = dir_url.path()?;
+
+        let path_str = NSString::to_string(path_string, pool); 
+
+        Some(PathBuf.from(path_str))
     })
 }
 
 pub fn init(level: log::LevelFilter) {
-    let log_path = get_documents_directory()
-        .map(|path| path.join("hachimi-edge.log"))
-        .unwrap_or_else(|| {
-            PathBuf::from("/tmp/hachimi-edge-fallback.log")
-        });
+    let docs_dir = get_documents_directory()
+        .expect("Hachimi PANIC: Could not find 'Documents' directory via NSFileManager.");
+
+    let log_path = docs_dir.join("hachimi-edge.log");
 
     let file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
-        .expect("Failed to open log file");
+        .expect(&format!("Hachimi PANIC: Failed to open log file at: {:?}", log_path));
 
     let logger = SimpleFileLogger {
         file: Mutex::new(file),
@@ -89,7 +90,7 @@ pub fn init(level: log::LevelFilter) {
         }
     }));
 
-    log::info!("--- iOS File Logger Initialized ---");
+    log::info!("--- iOS File Logger Initialized (NSFileManager) ---");
     log::info!("Logging to: {:?}", log_path);
 }
 
@@ -102,7 +103,7 @@ impl IosLog {
 }
 
 impl OtherLog for IosLog {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool { true }
+    fn enabled(&self, _metadata: &Metadata) -> bool { true }
     fn log(&self, _record: &log::Record) {}
     fn flush(&self) {}
 }

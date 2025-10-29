@@ -1,6 +1,8 @@
 use crate::core::gui::Gui;
 use egui_wgpu::Renderer as EguiRenderer;
-use objc::{msg_send, sel, sel_impl, runtime::Object};
+use objc2::{msg_send, sel};
+use objc2::runtime::Object;
+use objc2_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::CAMetalLayer;
 use once_cell::sync::OnceCell;
 use raw_window_handle::{
@@ -177,7 +179,3 @@ impl Renderer {
         output.present();
     }
 }
-
-#[repr(C)] #[derive(Clone, Copy)] struct CGSize { pub width: f64, pub height: f64 }
-#[repr(C)] #[derive(Clone, Copy)] struct CGRect { pub origin: CGPoint, pub size: CGSize }
-#[repr(C)] #[derive(Clone, Copy)] struct CGPoint { pub x: f64, pub y: f64 }
