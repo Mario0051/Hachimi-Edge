@@ -1,59 +1,110 @@
 use crate::core::log::Log;
-use log::{Level, Log as OtherLog, Metadata, Record};
-use oslog::OsLog;
+use log::{LevelFilter, Log as OtherLog, Metadata, Record};
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::sync::Mutex;
+use std::path::PathBuf;
 
-pub struct IosLog {
-    logger: OsLog,
+use objc2::rc::autoreleasepool;
+use objc2_foundation::{
+    NSSearchPathForDirectoriesInDomains, NSSearchPathDirectory, NSUserDomainMask,
+};
+
+struct SimpleFileLogger {
+    file: Mutex<File>,
 }
 
-impl IosLog {
-    pub fn new() -> IosLog {
-        IosLog {
-            logger: OsLog::new("com.hachimi-edge.mod", "default"),
-        }
-    }
-}
-
-impl OtherLog for IosLog {
+impl OtherLog for SimpleFileLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
     }
 
     fn log(&self, record: &Record) {
-        let msg = format!("{}", record.args());
-        match record.level() {
-            Level::Error => self.logger.error(&msg),
-            Level::Warn => self.logger.default(&msg),
-            Level::Info => self.logger.info(&msg),
-            Level::Debug => self.logger.debug(&msg),
-            Level::Trace => self.logger.debug(&msg),
-        };
+        if let Ok(mut file) = self.file.lock() {
+            let _ = writeln!(
+                file,
+                "[{}] {}",
+                record.level(),
+                record.args()
+            );
+        }
     }
 
-    fn flush(&self) {}
+    fn flush(&self) {
+        if let Ok(mut file) = self.file.lock() {
+            let _ = file.flush();
+        }
+    }
+}
+
+fn get_documents_directory() -> Option<PathBuf> {
+    autoreleasepool(|pool| {
+        let dirs = unsafe {
+            NSSearchPathForDirectoriesInDomains(
+                NSSearchPathDirectory::NSDocumentDirectory,
+                NSUserDomainMask::NSUserDomainMask,
+                true,
+            )
+        };
+
+        let dir = dirs.first(pool)?;
+        let path_str = dir.to_string(pool);
+
+        Some(PathBuf::from(path_str))
+    })
 }
 
 pub fn init(level: log::LevelFilter) {
-    let logger = IosLog::new();
+    let log_path = get_documents_directory()
+        .map(|path| path.join("hachimi-edge.log"))
+        .unwrap_or_else(|| {
+            PathBuf::from("/tmp/hachimi-edge-fallback.log")
+        });
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .expect("Failed to open log file");
+
+    let logger = SimpleFileLogger {
+        file: Mutex::new(file),
+    };
     log::set_boxed_logger(Box::new(logger)).unwrap();
     log::set_max_level(level);
 
-    std::panic::set_hook(Box::new(|panic_info| {
-        let logger = OsLog::new("com.hachimi-edge.mod", "panic");
-        logger.error(&format!("PANIC: {}", panic_info));
+    let panic_log_path = log_path.clone();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let msg = format!("PANIC: {}", panic_info);
+
+        log::error!("{}", msg); 
+
+        if let Ok(mut file) = OpenOptions::new().append(true).open(&panic_log_path) {
+            let _ = writeln!(file, "{}", msg);
+            let _ = file.flush();
+        }
     }));
 
-    info!("iOS os_log logger initialized.");
+    log::info!("--- iOS File Logger Initialized ---");
+    log::info!("Logging to: {:?}", log_path);
+}
+
+pub struct IosLog;
+
+impl IosLog {
+    pub fn new() -> IosLog {
+        IosLog
+    }
+}
+
+impl OtherLog for IosLog {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool { true }
+    fn log(&self, _record: &log::Record) {}
+    fn flush(&self) {}
 }
 
 impl Log for IosLog {
-    fn info(&self, s: &str) {
-        self.logger.info(s);
-    }
-    fn warn(&self, s: &str) {
-        self.logger.default(s);
-    }
-    fn error(&self, s: &str) {
-        self.logger.error(s);
-    }
+    fn info(&self, s: &str) { log::info!("{}", s); }
+    fn warn(&self, s: &str) { log::warn!("{}", s); }
+    fn error(&self, s: &str) { log::error!("{}", s); }
 }
