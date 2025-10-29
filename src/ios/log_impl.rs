@@ -5,9 +5,12 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::path::PathBuf;
 
-use objc2::rc::autoreleasepool;
+use objc::rc::autoreleasepool; 
+
 use objc2_foundation::{
-    NSSearchPathForDirectoriesInDomains, NSSearchPathDirectory, NSUserDomainMask,
+    NSSearchPathForDirectoriesInDomains, 
+    NSSearchPathDirectory, 
+    NSSearchPathDomainMask,
 };
 
 struct SimpleFileLogger {
@@ -41,13 +44,13 @@ fn get_documents_directory() -> Option<PathBuf> {
     autoreleasepool(|pool| {
         let dirs = unsafe {
             NSSearchPathForDirectoriesInDomains(
-                NSSearchPathDirectory::NSDocumentDirectory,
-                NSUserDomainMask::NSUserDomainMask,
+                NSSearchPathDirectory::DocumentDirectory,
+                NSSearchPathDomainMask::NSUserDomainMask,
                 true,
             )
         };
 
-        let dir = dirs.first(pool)?;
+        let dir = dirs.first()?;
         let path_str = dir.to_string(pool);
 
         Some(PathBuf::from(path_str))
