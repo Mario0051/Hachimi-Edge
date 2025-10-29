@@ -2,7 +2,7 @@ use crate::core::gui::Gui;
 use egui_wgpu::Renderer as EguiRenderer;
 use objc2::{msg_send, sel};
 use objc2::runtime::Object;
-use objc2_foundation::CoreGraphics::{CGPoint, CGRect, CGSize};
+use objc2_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::CAMetalLayer;
 use once_cell::sync::OnceCell;
 use raw_window_handle::{

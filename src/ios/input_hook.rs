@@ -2,9 +2,10 @@ use crate::core::gui::Gui;
 use egui::{PointerButton, Pos2};
 use objc2::{msg_send, sel};
 use objc2::runtime::{Class, Method, Object, Sel};
-use objc2_foundation::CoreGraphics::CGPoint;
+use objc2_foundation::CGPoint;
 use once_cell::sync::OnceCell;
 use std::ffi::c_void;
+use std::ffi::CString;
 
 type TouchesBeganFn = unsafe extern "C" fn(this: *mut Object, sel: Sel, touches: *mut Object, event: *mut Object);
 
@@ -88,7 +89,9 @@ pub fn init() {
     info!("Initializing iOS input hook...");
 
     unsafe {
+        let class_name = CString::new("UIView").unwrap();
         let class = match Class::get("UIView") {
+        let class = match Class::get(class_name.as_c_str()) {
             Some(c) => c,
             None => {
                 error!("Failed to find UIView class. Input hooking will not work.");
