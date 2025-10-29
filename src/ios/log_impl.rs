@@ -5,7 +5,7 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::path::PathBuf;
 
-use objc::rc::autoreleasepool; 
+use objc2_foundation::objc2::rc::autoreleasepool; 
 
 use objc2_foundation::{
     NSSearchPathForDirectoriesInDomains, 
@@ -45,12 +45,12 @@ fn get_documents_directory() -> Option<PathBuf> {
         let dirs = unsafe {
             NSSearchPathForDirectoriesInDomains(
                 NSSearchPathDirectory::DocumentDirectory,
-                NSSearchPathDomainMask::NSUserDomainMask,
+                NSSearchPathDomainMask::UserDomainMask,
                 true,
             )
         };
 
-        let dir = dirs.first()?;
+        let dir = dirs.firstObject()?;
         let path_str = dir.to_string(pool);
 
         Some(PathBuf::from(path_str))
