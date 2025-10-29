@@ -18,6 +18,21 @@ pub unsafe extern "C" fn dlopen(path: *const i8, mode: i32) -> *mut c_void {
 }
 
 fn initialize_hachimi() {
+    use std::fs::File;
+    use std::io::Write;
+
+    let test_path = std::panic::catch_unwind(|| {
+        super::game_impl::get_data_dir("") 
+    });
+
+    if let Ok(docs_dir) = test_path {
+        let test_log_path = docs_dir.join("hachimi_test_file.txt");
+        if let Ok(mut file) = File::create(&test_log_path) {
+            let _ = writeln!(file, "initialize_hachimi was called.");
+            let _ = file.flush();
+        }
+    }
+
     super::log_impl::init(log::LevelFilter::Info);
 
     info!("Hachimi synchronous initialization started...");
