@@ -2,7 +2,7 @@ use crate::core::gui::Gui;
 use egui::{PointerButton, Pos2};
 use objc2::{msg_send, sel};
 use objc2::runtime::{Class, Method, Object, Sel};
-use objc2_foundation::CGPoint;
+use objc2_core_foundation::CGPoint;
 use once_cell::sync::OnceCell;
 use std::ffi::c_void;
 use std::ffi::CString;
