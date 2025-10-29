@@ -57,9 +57,9 @@ pollster = "0.4"
 
 objc2 = "0.6.3"
 objc2-ui-kit = { version = "0.3.2", features = ["UIApplication"] }
-objc2-core-foundation = { version = "0.3.2", features = ["CFCGTypes"] }
 objc2-foundation = { version = "0.3.2", features = ["NSBundle", "NSFileManager", "NSString", "NSURL"] }
 objc2-quartz-core = { version = "0.3.2", features = ["CAMetalLayer"] }
+objc2-core-foundation = { version = "0.3.2", features = ["CFCGTypes"] }
 
 dobby-rs = "0.1"
 libc = "0.2"
