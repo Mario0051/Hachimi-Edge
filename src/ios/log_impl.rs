@@ -46,7 +46,7 @@ fn get_documents_directory() -> Option<PathBuf> {
         let file_manager = NSFileManager::defaultManager();
 
         let urls = file_manager.URLsForDirectory_inDomains(
-            NSSearchPathDirectory::DocumentDirectory,
+            NSSearchPathDirectory::CachesDirectory,
             NSSearchPathDomainMask::UserDomainMask,
         );
 
