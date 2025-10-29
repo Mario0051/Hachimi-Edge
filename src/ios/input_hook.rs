@@ -90,7 +90,7 @@ pub fn init() {
 
     unsafe {
         let class_name = CString::new("UIView").unwrap();
-        let class = match Class::get("UIView") {
+
         let class = match Class::get(class_name.as_c_str()) {
             Some(c) => c,
             None => {
