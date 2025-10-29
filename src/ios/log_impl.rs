@@ -42,10 +42,10 @@ impl OtherLog for SimpleFileLogger {
 }
 
 fn get_documents_directory() -> Option<PathBuf> {
-    autoreleasepool(|pool| {
+    autoreleasepool(|_pool| {
         let file_manager = NSFileManager::defaultManager();
 
-        let urls = file_manager.URLsForDirectory_inDomain(
+        let urls = file_manager.URLsForDirectory_inDomains(
             NSSearchPathDirectory::DocumentDirectory,
             NSSearchPathDomainMask::UserDomainMask,
         );
@@ -54,9 +54,9 @@ fn get_documents_directory() -> Option<PathBuf> {
 
         let path_string = dir_url.path()?;
 
-        let path_str = NSString::to_string(path_string, pool); 
+        let path_str = path_string.to_string(); 
 
-        Some(PathBuf.from(path_str))
+        Some(PathBuf::from(path_str))
     })
 }
 
@@ -103,7 +103,7 @@ impl IosLog {
 }
 
 impl OtherLog for IosLog {
-    fn enabled(&self, _metadata: &Metadata) -> bool { true }
+    fn enabled(&self, _metadata: &log::Metadata) -> bool { true }
     fn log(&self, _record: &log::Record) {}
     fn flush(&self) {}
 }
