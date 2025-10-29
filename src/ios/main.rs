@@ -5,6 +5,18 @@ static STARTUP_ONCE: Once = Once::new();
 
 #[no_mangle]
 pub unsafe extern "C" fn dlopen(path: *const i8, mode: i32) -> *mut c_void {
+    let test_path = std::panic::catch_unwind(|| {
+        super::game_impl::get_data_dir("")
+    });
+
+    if let Ok(docs_dir) = test_path {
+        let test_log_path = docs_dir.join("hachimi_dlopen_test.txt");
+        if let Ok(mut file) = File::create(&test_log_path) {
+            let _ = writeln!(file, "dlopen hook was executed!");
+            let _ = file.flush();
+        }
+    }
+
     let real_dlopen: extern "C" fn(*const i8, i32) -> *mut c_void =
         std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _));
 
