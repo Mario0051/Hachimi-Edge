@@ -3,6 +3,7 @@ name = "hachimi"
 version = "0.14.3"
 rust-version = "1.77"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 name = "hachimi"
@@ -94,6 +95,7 @@ features = [
 [build-dependencies]
 tauri-winres = "0.1"
 cc = "1.1"
+bindgen = "0.72.1"
 
 [package.metadata.tauri-winres]
 ProductName = "Hachimi"

@@ -1,11 +1,10 @@
 use std::process::{Command, Output};
+use std::path::PathBuf;
 
 fn setup_windows_build() {
-    // Link proxy export defs
     let absolute_path = std::fs::canonicalize("src/windows/proxy/exports.def").unwrap();
     println!("cargo:rustc-cdylib-link-arg=/DEF:{}", absolute_path.display());
 
-    // Generate and link version information
     let res = tauri_winres::WindowsResource::new();
     res.compile().unwrap();
 }
@@ -27,7 +26,7 @@ fn setup_version_env() {
         if let Some(output) = execute_command(Command::new("git").args(["rev-parse", "--short", "HEAD"])) {
             version_str.push_str("-");
             let output_str = command_output_to_string(output);
-            version_str.push_str(&output_str[..output_str.len()-1]); // remove \n
+            version_str.push_str(&output_str[..output_str.len()-1]);
         }
         else {
             println!("cargo:warning=Failed to retrieve git commit hash");
@@ -60,6 +59,35 @@ fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     if target_os == "windows" {
         setup_windows_build();
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        println!("cargo:rustc-link-search=native=vendor/titanox/lib");
+
+        println!("cargo:rustc-link-lib=static=titanox");
+
+        println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+
+        println!("cargo:rustc-link-lib=c++");
+
+        println!("cargo:rerun-if-changed=vendor/titanox/include/libtitanox.h");
+
+        let bindings = bindgen::Builder::default()
+            .header("vendor/titanox/include/libtitanox.h")
+            .clang_arg("-Ivendor/titanox/include")
+            .clang_arg("-x")
+            .clang_arg("objective-c")
+            .trust_clang_mangling(false)
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+            .generate()
+            .expect("Unable to generate bindings for Titanox");
+
+        let out_path = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+        bindings
+            .write_to_file(out_path.join("titanox_bindings.rs"))
+            .expect("Couldn't write Titanox bindings!");
     }
 
     setup_version_env();
