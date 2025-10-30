@@ -61,8 +61,7 @@ fn main() {
         setup_windows_build();
     }
 
-    #[cfg(target_os = "ios")]
-    {
+    if target_os == "ios" {
         println!("cargo:rustc-link-search=native=vendor/titanox/lib");
 
         println!("cargo:rustc-link-lib=static=titanox");
