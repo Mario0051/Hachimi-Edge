@@ -1,9 +1,9 @@
 use crate::core::gui::Gui;
 use std::ffi::{c_void, CString};
 use std::sync::Mutex;
+use super::titanox;
 use objc::{msg_send, sel, sel_impl};
 use objc::runtime::Class;
-use super::titanox;
 
 type PresentFn = unsafe extern "C" fn(this: *mut c_void, timer: *mut c_void, drawable: *mut c_void);
 
@@ -25,11 +25,13 @@ pub fn setup_render_hook() {
         let symbol_name = CString::new("_UnityPresentsTimerAndDrawable").unwrap();
         let lib_name = CString::new("UnityFramework").unwrap();
 
-        let _: () = msg_send![titanox_hook_class
-            hookStaticFunction: symbol_name.as_ptr()
-            withReplacement: on_present as *mut c_void
-            inLibrary: lib_name.as_ptr()
-            outOldFunction: &mut ORIG_PRESENT as *mut _ as *mut *mut c_void
+        let sel = sel!(hookStaticFunction:withReplacement:inLibrary:outOldFunction:);
+
+        let _: () = msg_send![titanox_hook_class, sel,
+            symbol_name.as_ptr(),
+            on_present as *mut c_void,
+            lib_name.as_ptr(),
+            &mut ORIG_PRESENT as *mut _ as *mut *mut c_void
         ];
 
         if ORIG_PRESENT.is_some() {

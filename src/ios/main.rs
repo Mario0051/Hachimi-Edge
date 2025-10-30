@@ -1,8 +1,8 @@
+use objc::{msg_send, sel, sel_impl};
+use objc::runtime::Class;
 use std::ffi::{c_void, CStr, CString};
 use std::sync::Once;
 use std::thread;
-use objc::{msg_send, sel, sel_impl};
-use objc::runtime::Class;
 use super::titanox;
 
 static STARTUP_ONCE: Once = Once::new();
@@ -24,14 +24,15 @@ unsafe extern "C" fn hooked_dlopen(path: *const i8, mode: i32) -> *mut c_void {
 unsafe extern "C" fn hachimi_init() {
     let titanox_hook_class = Class::get("TitanoxHook").unwrap();
     let symbol_name = CString::new("dlopen").unwrap();
+    let lib_name: *const c_void = std::ptr::null();
 
-    let lib_name: *const c_void = std::ptr::null(); 
+    let sel = sel!(hookStaticFunction:withReplacement:inLibrary:outOldFunction:);
 
-    let _: () = msg_send![titanox_hook_class
-        hookStaticFunction: symbol_name.as_ptr()
-        withReplacement: hooked_dlopen as *mut c_void
-        inLibrary: lib_name
-        outOldFunction: &mut REAL_DLOPEN as *mut _ as *mut *mut c_void
+    let _: () = msg_send![titanox_hook_class, sel,
+        symbol_name.as_ptr(),
+        hooked_dlopen as *mut c_void,
+        lib_name,
+        &mut REAL_DLOPEN as *mut _ as *mut *mut c_void
     ];
 }
 
