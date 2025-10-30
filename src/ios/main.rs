@@ -22,11 +22,9 @@ unsafe fn hachimi_init_ctor() {
     let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
     if !target_fn.is_null() {
-        hook(
-            target_fn as _,
-            hooked_dlopen as _,
-            &mut REAL_DLOPEN as *mut _ as _,
-        );
+        if let Ok(trampoline) = hook(target_fn as _, hooked_dlopen as _) {
+            REAL_DLOPEN = Some(std::mem::transmute(trampoline));
+        }
     }
 }
 
