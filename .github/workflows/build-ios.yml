@@ -30,7 +30,7 @@ jobs:
     - name: Cache Cargo dependencies (rust-cache)
       uses: swatinem/rust-cache@v2
 
-    - name: Build libtitanox
+    - name: Build and Replace libtitanox
       run: |
         git clone https://github.com/Ragekill3377/Titanox.git $HOME/titanox-src
 
@@ -44,14 +44,17 @@ jobs:
         sed -i '' 's/TARGET := iphone:clang:13.7/TARGET := iphone:clang:latest/' Makefile
         sed -i '' 's/THEOS = \/home\/rage\/theos/# THEOS = \/home\/rage\/theos/' Makefile
         sed -i '' 's/SYSROOT = $(THEOS)\/sdks\/iPhoneOS13.7.sdk/# SYSROOT = $(THEOS)\/sdks\/iPhoneOS13.7.sdk/' Makefile
-
         sed -i '' '/^LIBRARY_NAME = libtitanox/ a \
         libtitanox_TYPE = static
         ' Makefile
 
-        make package || true
+        make || true
 
-        cp .theos/obj/libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
+        cd .theos/obj/arm64
+
+        libtool -static -o libtitanox.a $(find . -name "*.o")
+
+        cp libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
 
     - name: Build for iOS
       run: |
