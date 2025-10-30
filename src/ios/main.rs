@@ -1,7 +1,7 @@
 use std::ffi::{c_void, CStr};
 use std::sync::Once;
 use ctor::ctor;
-use dobby_rs::inline_hook;
+use dobby_rs::hook;
 
 static STARTUP_ONCE: Once = Once::new();
 
@@ -22,7 +22,7 @@ unsafe fn hachimi_init_ctor() {
     let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
     if !target_fn.is_null() {
-        inline_hook(
+        hook(
             target_fn as _,
             hooked_dlopen as _,
             &mut REAL_DLOPEN as *mut _ as _,
