@@ -30,7 +30,7 @@ jobs:
     - name: Cache Cargo dependencies (rust-cache)
       uses: swatinem/rust-cache@v2
 
-    - name: Build and Replace libtitanox
+    - name: Build libtitanox
       run: |
         git clone https://github.com/Ragekill3377/Titanox.git $HOME/titanox-src
 
