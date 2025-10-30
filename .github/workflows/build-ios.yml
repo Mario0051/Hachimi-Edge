@@ -27,6 +27,9 @@ jobs:
     - name: Cache Cargo dependencies (rust-cache)
       uses: swatinem/rust-cache@v2
 
+    - name: Force bindgen re-run
+      run: touch vendor/titanox/include/libtitanox.h
+
     - name: Build for iOS
       run: |
         export SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
