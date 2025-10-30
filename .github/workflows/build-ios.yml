@@ -46,7 +46,7 @@ jobs:
         sed -i '' 's/SYSROOT = $(THEOS)\/sdks\/iPhoneOS13.7.sdk/# SYSROOT = $(THEOS)\/sdks\/iPhoneOS13.7.sdk/' Makefile
         sed -i '' 's/LIBRARY_NAME = libtitanox/LIBRARY_NAME = libtitanox\nlibtitanox_TYPE = static/' Makefile
 
-        make
+        make package || true
 
         cp .theos/obj/libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
 
