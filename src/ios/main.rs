@@ -31,22 +31,27 @@ pub unsafe extern "C" fn dlopen(path: *const i8, mode: i32) -> *mut c_void {
     handle
 }
 
-fn initialize_hachimi() {
-    use std::fs::File;
-    use std::io::Write;
-
+#[ctor]
+unsafe fn hachimi_init_ctor() {
     let test_path = std::panic::catch_unwind(|| {
-        super::game_impl::get_data_dir("") 
+        super::game_impl::get_data_dir("")
     });
 
     if let Ok(docs_dir) = test_path {
-        let test_log_path = docs_dir.join("hachimi_test_file.txt");
+        let test_log_path = docs_dir.join("hachimi_ctor_test.txt");
         if let Ok(mut file) = File::create(&test_log_path) {
-            let _ = writeln!(file, "initialize_hachimi was called.");
+            let _ = writeln!(file, "ctor hook was executed!");
             let _ = file.flush();
         }
     }
 
+    STARTUP_ONCE.call_once(|| {
+        eprintln!("[Hachimi-iOS] ctor hook fired, initializing synchronously...");
+        initialize_hachimi();
+    });
+}
+
+fn initialize_hachimi() {
     super::log_impl::init(log::LevelFilter::Info);
 
     info!("Hachimi synchronous initialization started...");
