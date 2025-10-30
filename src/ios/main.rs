@@ -1,7 +1,7 @@
 use std::ffi::{c_void, CStr};
 use std::sync::Once;
 use std::thread;
-use dobby_rs::hook;
+use super::titanox;
 
 static STARTUP_ONCE: Once = Once::new();
 
@@ -23,9 +23,13 @@ unsafe extern "C" fn hachimi_init() {
     let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
     if !target_fn.is_null() {
-        if let Ok(trampoline) = hook(target_fn as _, hooked_dlopen as _) {
-            REAL_DLOPEN = Some(std::mem::transmute(trampoline));
-        }
+        let status = titanox::TXHookFunction(
+            target_fn,
+            hooked_dlopen as *mut c_void,
+            &mut REAL_DLOPEN as *mut _ as *mut *mut c_void,
+        );
+
+        if status != titanox::TX_SUCCESS as i32 {}
     }
 }
 
