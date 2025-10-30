@@ -1,6 +1,5 @@
 use std::ffi::{c_void, CStr};
 use std::sync::Once;
-use ctor::ctor;
 use dobby_rs::hook;
 
 static STARTUP_ONCE: Once = Once::new();
@@ -17,8 +16,7 @@ unsafe extern "C" fn hooked_dlopen(path: *const i8, mode: i32) -> *mut c_void {
     handle
 }
 
-#[ctor]
-unsafe fn hachimi_init_ctor() {
+unsafe fn hachimi_init() {
     let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
     if !target_fn.is_null() {
@@ -53,3 +51,9 @@ fn initialize_hachimi() {
 
     info!("iOS initialization complete.");
 }
+
+#[link_section = "__DATA,__mod_init_func"]
+#[used]
+static CONSTRUCTOR: unsafe extern "C" fn() = {
+    hachimi_init
+};
