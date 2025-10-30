@@ -64,7 +64,6 @@ objc2-core-foundation = { version = "0.3.2", features = ["CFCGTypes"] }
 dobby-rs = "0.1"
 libc = "0.2"
 simplelog = "0.12"
-ctor = "0.6.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windebug_logger = "0.1"
