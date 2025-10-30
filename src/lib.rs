@@ -1,5 +1,9 @@
 #![allow(static_mut_refs)]
 
+#[cfg(target_os = "ios")]
+#[macro_use]
+extern crate objc;
+
 #[macro_use] extern crate log;
 #[macro_use] extern crate cstr;
 
