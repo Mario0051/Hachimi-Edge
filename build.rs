@@ -92,6 +92,7 @@ if target_os == "ios" {
             .clang_arg("objective-c++")
             .clang_arg(format!("--sysroot={}", sdk_path))
             .clang_arg(format!("-isystem{}/usr/include/c++/v1", sdk_path))
+            .clang_arg("-std=c++17")
             .trust_clang_mangling(false)
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
             .generate()
