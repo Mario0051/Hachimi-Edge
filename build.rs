@@ -89,7 +89,7 @@ if target_os == "ios" {
             .header("vendor/titanox/include/libtitanox.h")
             .clang_arg("-Ivendor/titanox/include")
             .clang_arg("-x")
-            .clang_arg("objective-c")
+            .clang_arg("objective-c++")
             .clang_arg(format!("--sysroot={}", sdk_path))
             .trust_clang_mangling(false)
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
