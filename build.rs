@@ -102,6 +102,8 @@ if target_os == "ios" {
             .blocklist_var("std_value")
             .blocklist_var("std___block_size")
             .trust_clang_mangling(false)
+            .raw_line("pub type _Tp = ::std::os::raw::c_void;")
+            .raw_line("pub type _ValueType = ::std::os::raw::c_void;")
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
             .generate()
             .expect("Unable to generate bindings for Titanox");
