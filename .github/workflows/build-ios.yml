@@ -37,6 +37,8 @@ jobs:
         git clone --recursive https://github.com/theos/theos.git $HOME/theos
         export THEOS=$HOME/theos
 
+        brew install ldid
+
         cd $HOME/titanox-src/libtitanox
 
         sed -i '' 's/TARGET := iphone:clang:13.7/TARGET := iphone:clang:latest/' Makefile
