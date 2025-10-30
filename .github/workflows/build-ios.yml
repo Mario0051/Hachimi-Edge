@@ -54,6 +54,8 @@ jobs:
 
         libtool -static -o libtitanox.a $(find . -name "*.o")
 
+        mkdir -p $GITHUB_WORKSPACE/vendor/titanox/lib
+
         cp libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
 
     - name: Build for iOS
