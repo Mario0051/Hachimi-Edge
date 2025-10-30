@@ -99,6 +99,8 @@ if target_os == "ios" {
             .blocklist_item("char_type")
             .blocklist_item("rep")
             .blocklist_item("timezone")
+            .blocklist_item("std_value")
+            .blocklist_item("std___block_size")
             .trust_clang_mangling(false)
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
             .generate()
