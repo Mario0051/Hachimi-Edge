@@ -134,6 +134,10 @@ extern "C" fn nativeInjectEvent(mut env: JNIEnv, obj: JObject, input_event: JObj
             .unwrap()
             .i()
             .unwrap();
+        let repeat_count = env.call_method(&input_event, "getRepeatCount", "()I", &[])
+            .unwrap()
+            .i()
+            .unwrap();
 
         let pressed = action == ACTION_DOWN;
         let now = Instant::now();
@@ -141,7 +145,7 @@ extern "C" fn nativeInjectEvent(mut env: JNIEnv, obj: JObject, input_event: JObj
             keymap::KEYCODE_VOLUME_UP => {
                 VOLUME_UP_PRESSED.store(pressed, Ordering::Relaxed);
 
-                if pressed {
+                if pressed && repeat_count == 0 {
                     if Hachimi::instance().config.load().hide_ingame_ui_hotkey && check_volume_up_double_tap(now) {
                         return JNI_TRUE; 
                     }

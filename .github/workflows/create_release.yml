@@ -1,12 +1,6 @@
 name: Create Release
 
-on:
-  workflow_dispatch:
-    inputs:
-      relver:
-        description: "Release version"
-        type: string
-        required: false
+on: workflow_dispatch
 
 permissions:
   contents: write
@@ -50,18 +44,18 @@ jobs:
 
       - name: Build Cellar
         run: |
-          git clone --depth 1 https://github.com/Hachimi-Hachimi/Cellar
+          git clone --depth 1 --revision d4c3f79801c8131e26df585766c35e5ce11ec57f https://github.com/Hachimi-Hachimi/Cellar
           cd Cellar
           cargo build --target x86_64-pc-windows-msvc --target-dir build --release
           move build\x86_64-pc-windows-msvc\release\cellar.dll build
           cd ..
 
       - name: Check out FunnyHoney
-        run: git clone --depth 1 https://codeberg.org/LeadRDRK/FunnyHoney.git
+        run: git clone --depth 1 --revision 418b5348bd9b7376cc7485c591ca69d49aa4d805 https://codeberg.org/LeadRDRK/FunnyHoney.git
 
       - name: Build Installer
         run: |
-          git clone --depth 1 https://github.com/teiosteppa/Installer
+          git clone --depth 1 --revision 5bf02f49f31ddd71ec102d079663facf4b182539 https://github.com/teiosteppa/Installer
           copy build\hachimi.dll Installer
           move Cellar\build\cellar.dll Installer
           move FunnyHoney\FunnyHoney.exe Installer
@@ -83,12 +77,13 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
     steps:
-      - name: Get latest release info from official
+      - name: Get release version
         id: get_info
         run: |
-          release_info=$(curl -sL "https://api.github.com/repos/Hachimi-Hachimi/Hachimi/releases/latest" | jq -r '{tag: .tag_name, url: .html_url}')
-          echo "latest_tag=$(echo $release_info | jq -r .tag)" >> $GITHUB_OUTPUT
-          echo "release_url=$(echo $release_info | jq -r .url)" >> $GITHUB_OUTPUT
+          VERSION=$(curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/Cargo.toml" | \
+            awk '/^\[package\]/{flag=1} flag && /^version/{print $3; exit}' | \
+            tr -d '"')
+          echo "release_version=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v5
@@ -98,10 +93,8 @@ jobs:
       - name: Upload binaries to a release
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            ${{ github.event.inputs.relver == '' && steps.get_info.outputs.release_url || '' }}
-          generate_release_notes: ${{ github.event.inputs.relver != '' && true || false }}
+          generate_release_notes: true
           files: |
             artifacts/android/*
             artifacts/windows/*
-          tag_name: ${{ github.event.inputs.relver || steps.get_info.outputs.latest_tag }}
+          tag_name: ${{ steps.get_info.outputs.release_version }}
