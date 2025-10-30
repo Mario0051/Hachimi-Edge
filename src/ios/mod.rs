@@ -5,14 +5,6 @@ pub mod titanox {
     #[allow(non_camel_case_types)]
     pub type TXStatus = ::std::os::raw::c_int;
     pub const TX_SUCCESS: TXStatus = 0;
-
-    extern "C" {
-        pub fn TXHookFunction(
-            target: *mut ::std::ffi::c_void,
-            replacement: *mut ::std::ffi::c_void,
-            original: *mut *mut ::std::ffi::c_void,
-        ) -> TXStatus;
-    }
 }
 
 pub mod game_impl;

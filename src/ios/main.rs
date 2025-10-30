@@ -1,6 +1,8 @@
-use std::ffi::{c_void, CStr};
+use std::ffi::{c_void, CStr, CString};
 use std::sync::Once;
 use std::thread;
+use objc::{msg_send, sel, sel_impl};
+use objc::runtime::Class;
 use super::titanox;
 
 static STARTUP_ONCE: Once = Once::new();
@@ -20,17 +22,17 @@ unsafe extern "C" fn hooked_dlopen(path: *const i8, mode: i32) -> *mut c_void {
 }
 
 unsafe extern "C" fn hachimi_init() {
-    let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
+    let titanox_hook_class = Class::get("TitanoxHook").unwrap();
+    let symbol_name = CString::new("dlopen").unwrap();
 
-    if !target_fn.is_null() {
-        let status = titanox::TXHookFunction(
-            target_fn,
-            hooked_dlopen as *mut c_void,
-            &mut REAL_DLOPEN as *mut _ as *mut *mut c_void,
-        );
+    let lib_name: *const c_void = std::ptr::null(); 
 
-        if status != titanox::TX_SUCCESS as i32 {}
-    }
+    let _: () = msg_send![titanox_hook_class,
+        hookStaticFunction: symbol_name.as_ptr(),
+        withReplacement: hooked_dlopen as *mut c_void,
+        inLibrary: lib_name,
+        outOldFunction: &mut REAL_DLOPEN as *mut _ as *mut *mut c_void
+    ];
 }
 
 fn initialize_hachimi() {
