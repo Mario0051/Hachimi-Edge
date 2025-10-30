@@ -1,61 +1,37 @@
 use std::ffi::{c_void, CStr};
 use std::sync::Once;
-use std::fs::File;
-use std::io::Write;
-use ctor::ctor;
 
 static STARTUP_ONCE: Once = Once::new();
 
-#[no_mangle]
-pub unsafe extern "C" fn dlopen(path: *const i8, mode: i32) -> *mut c_void {
-    let test_path = std::panic::catch_unwind(|| {
-        super::game_impl::get_data_dir("")
-    });
+static mut REAL_DLOPEN: Option<extern "C" fn(*const i8, i32) -> *mut c_void> = None;
 
-    if let Ok(docs_dir) = test_path {
-        let test_log_path = docs_dir.join("hachimi_dlopen_test.txt");
-        if let Ok(mut file) = File::create(&test_log_path) {
-            let _ = writeln!(file, "dlopen hook was executed!");
-            let _ = file.flush();
-        }
-    }
-
-    let real_dlopen: extern "C" fn(*const i8, i32) -> *mut c_void =
-        std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _));
+unsafe extern "C" fn hooked_dlopen(path: *const i8, mode: i32) -> *mut c_void {
+    let handle = REAL_DLOPEN.unwrap()(path, mode);
 
     STARTUP_ONCE.call_once(|| {
-        eprintln!("[Hachimi-iOS] Intercepted dlopen, initializing synchronously...");
         initialize_hachimi();
     });
 
-    let handle = real_dlopen(path, mode);
     handle
 }
 
-#[ctor]
+#[constructor]
 unsafe fn hachimi_init_ctor() {
-    let test_path = std::panic::catch_unwind(|| {
-        super::game_impl::get_data_dir("")
-    });
+    let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
-    if let Ok(docs_dir) = test_path {
-        let test_log_path = docs_dir.join("hachimi_ctor_test.txt");
-        if let Ok(mut file) = File::create(&test_log_path) {
-            let _ = writeln!(file, "ctor hook was executed!");
-            let _ = file.flush();
-        }
+    if !target_fn.is_null() {
+        super::hook::inline_hook(
+            target_fn as _,
+            hooked_dlopen as _,
+            &mut REAL_DLOPEN as *mut _ as _,
+        );
     }
-
-    STARTUP_ONCE.call_once(|| {
-        eprintln!("[Hachimi-iOS] ctor hook fired, initializing synchronously...");
-        initialize_hachimi();
-    });
 }
 
 fn initialize_hachimi() {
     super::log_impl::init(log::LevelFilter::Info);
 
-    info!("Hachimi synchronous initialization started...");
+    info!("Hachimi synchronous initialization started (via hooked dlopen)...");
 
     crate::core::init(
         Box::new(super::log_impl::IosLog::new()),
