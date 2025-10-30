@@ -16,7 +16,7 @@ unsafe extern "C" fn hooked_dlopen(path: *const i8, mode: i32) -> *mut c_void {
     handle
 }
 
-unsafe fn hachimi_init() {
+unsafe extern "C" fn hachimi_init() {
     let target_fn = libc::dlsym(libc::RTLD_NEXT, b"dlopen\0".as_ptr() as _);
 
     if !target_fn.is_null() {
