@@ -48,7 +48,7 @@ jobs:
 
         make
 
-        cp obj/libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
+        cp .theos/obj/libtitanox.a $GITHUB_WORKSPACE/vendor/titanox/lib/libtitanox.a
 
     - name: Build for iOS
       run: |
