@@ -61,7 +61,7 @@ fn main() {
         setup_windows_build();
     }
 
-    if target_os == "ios" {
+if target_os == "ios" {
         println!("cargo:rustc-link-search=native=vendor/titanox/lib");
 
         println!("cargo:rustc-link-lib=static=titanox");
@@ -73,11 +73,24 @@ fn main() {
 
         println!("cargo:rerun-if-changed=vendor/titanox/include/libtitanox.h");
 
+        let output = Command::new("xcrun")
+            .args(["--sdk", "iphoneos", "--show-sdk-path"])
+            .output()
+            .expect("Failed to run xcrun. Is Xcode command line tools installed?");
+
+        if !output.status.success() {
+            panic!("xcrun failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        let sdk_path_str = String::from_utf8_lossy(&output.stdout);
+        let sdk_path = sdk_path_str.trim();
+
         let bindings = bindgen::Builder::default()
             .header("vendor/titanox/include/libtitanox.h")
             .clang_arg("-Ivendor/titanox/include")
             .clang_arg("-x")
             .clang_arg("objective-c")
+            .clang_arg(format!("--sysroot={}", sdk_path))
             .trust_clang_mangling(false)
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
             .generate()
