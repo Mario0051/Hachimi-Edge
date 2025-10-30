@@ -25,10 +25,10 @@ pub fn setup_render_hook() {
         let symbol_name = CString::new("_UnityPresentsTimerAndDrawable").unwrap();
         let lib_name = CString::new("UnityFramework").unwrap();
 
-        let _: () = msg_send![titanox_hook_class,
-            hookStaticFunction: symbol_name.as_ptr(),
-            withReplacement: on_present as *mut c_void,
-            inLibrary: lib_name.as_ptr(),
+        let _: () = msg_send![titanox_hook_class
+            hookStaticFunction: symbol_name.as_ptr()
+            withReplacement: on_present as *mut c_void
+            inLibrary: lib_name.as_ptr()
             outOldFunction: &mut ORIG_PRESENT as *mut _ as *mut *mut c_void
         ];
 

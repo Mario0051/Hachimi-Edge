@@ -27,10 +27,10 @@ unsafe extern "C" fn hachimi_init() {
 
     let lib_name: *const c_void = std::ptr::null(); 
 
-    let _: () = msg_send![titanox_hook_class,
-        hookStaticFunction: symbol_name.as_ptr(),
-        withReplacement: hooked_dlopen as *mut c_void,
-        inLibrary: lib_name,
+    let _: () = msg_send![titanox_hook_class
+        hookStaticFunction: symbol_name.as_ptr()
+        withReplacement: hooked_dlopen as *mut c_void
+        inLibrary: lib_name
         outOldFunction: &mut REAL_DLOPEN as *mut _ as *mut *mut c_void
     ];
 }
