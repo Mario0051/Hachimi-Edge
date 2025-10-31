@@ -20,7 +20,13 @@ unsafe extern "C" fn on_present(this: *mut c_void, timer: *mut c_void, drawable:
 
 pub fn setup_render_hook() {
     unsafe {
-        let titanox_hook_class = Class::get("TitanoxHook").unwrap();
+        let titanox_hook_class = match Class::get("TitanoxHook") {
+            Some(class) => class,
+            None => {
+                error!("Failed to get TitanoxHook class. GUI will not be available.");
+                return;
+            }
+        };
 
         let symbol_name = CString::new("_UnityPresentsTimerAndDrawable").unwrap();
         let lib_name = CString::new("UnityFramework").unwrap();
