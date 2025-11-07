@@ -235,4 +235,27 @@ fn download_and_install_thread_impl(url: String) {
     env.call_method(
         intent_obj,
         "setDataAndType",
-        "(Landroid/net/Uri;Ljava/lang
+        "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
+        &[JValue::Object(&uri_obj), JValue::Object(&mime_type.into())],
+    )
+    .unwrap();
+
+    let flag_activity_new_task = 0x10000000;
+    let flag_grant_read_uri = 0x00000001;
+    env.call_method(
+        intent_obj,
+        "addFlags",
+        "(I)Landroid/content/Intent;",
+        &[JValue::Int(flag_activity_new_task | flag_grant_read_uri)],
+    )
+    .unwrap();
+
+    env.call_method(
+        context_obj,
+        "startActivity",
+        "(Landroid/content/Intent;)V",
+        &[JValue::Object(&intent_obj)],
+    )
+    .unwrap();
+
+}
