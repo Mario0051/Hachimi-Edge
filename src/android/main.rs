@@ -28,8 +28,8 @@ pub extern "C" fn JNI_OnLoad(vm: JavaVM, reserved: *mut c_void) -> jint {
     }
     let mut env = vm.get_env().unwrap();
 
-    let context = utils::get_context(&mut env);
-    updater::init_updater(&env, context);
+    let context_ref = utils::get_context(&mut env);
+    updater::init_updater(&env, context_ref);
     updater::check_for_updates();
 
     hook::init(env.get_raw());

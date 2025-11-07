@@ -47,10 +47,10 @@ static mut APP_CONTEXT: Option<GlobalRef> = None;
 pub static DOWNLOAD_STATE: Lazy<Mutex<DownloadState>> = Lazy::new(|| Mutex::new(DownloadState::Idle));
 pub static DOWNLOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub fn init_updater(env: &JNIEnv, context: JObject) {
+pub fn init_updater(env: &JNIEnv, context_ref: GlobalRef) {
     unsafe {
         JAVA_VM = env.get_java_vm().ok();
-        APP_CONTEXT = env.new_global_ref(context).ok();
+        APP_CONTEXT = Some(context_ref);
     }
 }
 

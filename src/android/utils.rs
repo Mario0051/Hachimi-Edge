@@ -1,7 +1,7 @@
-use jni::objects::JObject;
+use jni::objects::{GlobalRef, JObject};
 use jni::JNIEnv;
 
-pub fn get_context<'a>(env: &'a mut JNIEnv<'a>) -> JObject<'a> {
+pub fn get_context(env: &mut JNIEnv) -> GlobalRef {
     let activity_thread_class = env
         .find_class("android/app/ActivityThread")
         .expect("Failed to find ActivityThread class");
@@ -27,7 +27,8 @@ pub fn get_context<'a>(env: &'a mut JNIEnv<'a>) -> JObject<'a> {
         .l()
         .unwrap();
 
-    context_obj
+    env.new_global_ref(context_obj)
+        .expect("Failed to create GlobalRef for context")
 }
 
 pub fn get_device_api_level(env: *mut jni::sys::JNIEnv) -> i32 {
