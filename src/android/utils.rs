@@ -2,32 +2,21 @@ use jni::objects::{GlobalRef, JObject};
 use jni::JNIEnv;
 
 pub fn get_context(env: &mut JNIEnv) -> GlobalRef {
-    let activity_thread_class = env
-        .find_class("android/app/ActivityThread")
-        .expect("Failed to find ActivityThread class");
-    let activity_thread_obj = env
-        .call_static_method(
-            activity_thread_class,
-            "currentActivityThread",
-            "()Landroid/app/ActivityThread;",
-            &[],
+    let unity_player_class = env
+        .find_class("com/unity3d/player/UnityPlayer")
+        .expect("Failed to find com.unity3d.player.UnityPlayer class");
+
+    let activity_obj = env
+        .get_static_field(
+            unity_player_class,
+            "currentActivity",
+            "Landroid/app/Activity;",
         )
-        .expect("Failed to get current ActivityThread")
+        .expect("Failed to get static field 'currentActivity'")
         .l()
         .unwrap();
 
-    let context_obj = env
-        .call_method(
-            activity_thread_obj,
-            "getApplication",
-            "()Landroid/app/Application;",
-            &[],
-        )
-        .expect("Failed to get Application context")
-        .l()
-        .unwrap();
-
-    env.new_global_ref(context_obj)
+    env.new_global_ref(activity_obj)
         .expect("Failed to create GlobalRef for context")
 }
 
