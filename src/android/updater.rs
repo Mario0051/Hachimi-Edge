@@ -1,10 +1,9 @@
-use jni::objects::{GlobalRef, JObject, JString, JValue};
+use jni::objects::{GlobalRef, JObject, JValue};
 use jni::{JNIEnv, JavaVM};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use semver::Version;
 use serde::Deserialize;
-use std::ffi::CString;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
@@ -48,7 +47,7 @@ static mut APP_CONTEXT: Option<GlobalRef> = None;
 pub static DOWNLOAD_STATE: Lazy<Mutex<DownloadState>> = Lazy::new(|| Mutex::new(DownloadState::Idle));
 pub static DOWNLOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub fn init_updater(env: JNIEnv, context: JObject) {
+pub fn init_updater(env: &JNIEnv, context: JObject) {
     unsafe {
         JAVA_VM = env.get_java_vm().ok();
         APP_CONTEXT = env.new_global_ref(context).ok();
@@ -130,14 +129,14 @@ fn download_and_install_thread_impl(url: String) {
         .l()
         .unwrap();
 
+    let cache_dir_path_jstr = env
+        .call_method(cache_dir_obj, "getAbsolutePath", "()Ljava/lang/String;", &[])
+        .unwrap()
+        .l()
+        .unwrap();
+
     let cache_dir_path: String = env
-        .get_string(
-            env.call_method(cache_dir_obj, "getAbsolutePath", "()Ljava/lang/String;", &[])
-                .unwrap()
-                .l()
-                .unwrap()
-                .into(),
-        )
+        .get_string(&cache_dir_path_jstr.into())
         .unwrap()
         .into();
 
@@ -179,24 +178,23 @@ fn download_and_install_thread_impl(url: String) {
 
     *DOWNLOAD_STATE.lock() = DownloadState::Downloaded(apk_path.clone());
 
+    let apk_path_jstr = env.new_string(apk_path.to_str().unwrap()).unwrap();
     let file_obj = env
         .new_object(
             "java/io/File",
             "(Ljava/lang/String;)V",
-            &[JValue::Object(
-                env.new_string(apk_path.to_str().unwrap()).unwrap().into(),
-            )],
+            &[JValue::from(apk_path_jstr)],
         )
         .unwrap();
 
+    let package_name_jobject = env
+        .call_method(context_obj, "getPackageName", "()Ljava/lang/String;", &[])
+        .unwrap()
+        .l()
+        .unwrap();
+
     let package_name_str: String = env
-        .get_string(
-            env.call_method(context_obj, "getPackageName", "()Ljava/lang/String;", &[])
-                .unwrap()
-                .l()
-                .unwrap()
-                .into(),
-        )
+        .get_string(&package_name_jobject.into())
         .unwrap()
         .into();
 
@@ -210,8 +208,8 @@ fn download_and_install_thread_impl(url: String) {
             "(Landroid/content/Context;Ljava/lang/String;Ljava/io/File;)Landroid/net/Uri;",
             &[
                 JValue::Object(context_obj),
-                JValue::Object(authority.into()),
-                JValue::Object(file_obj),
+                JValue::from(authority),
+                JValue::Object(&file_obj),
             ],
         )
         .unwrap()
@@ -220,13 +218,14 @@ fn download_and_install_thread_impl(url: String) {
 
     *DOWNLOAD_STATE.lock() = DownloadState::Installing;
     let intent_class = env.find_class("android/content/Intent").unwrap();
+
     let action_view = env.new_string("android.intent.action.VIEW").unwrap();
 
     let intent_obj = env
         .new_object(
             intent_class,
             "(Ljava/lang/String;)V",
-            &[JValue::Object(action_view.into())],
+            &[JValue::from(action_view)],
         )
         .unwrap();
 
@@ -237,7 +236,7 @@ fn download_and_install_thread_impl(url: String) {
         intent_obj,
         "setDataAndType",
         "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
-        &[JValue::Object(uri_obj), JValue::Object(mime_type.into())],
+        &[JValue::Object(&uri_obj), JValue::from(mime_type)],
     )
     .unwrap();
 
@@ -255,7 +254,7 @@ fn download_and_install_thread_impl(url: String) {
         context_obj,
         "startActivity",
         "(Landroid/content/Intent;)V",
-        &[JValue::Object(intent_obj)],
+        &[JValue::Object(&intent_obj)],
     )
     .unwrap();
 
