@@ -46,7 +46,8 @@ unsafe extern "C" fn post_app_specialize(this: *mut Module, _args: *const AppSpe
         }
 
         let mut env = unsafe { JNIEnv::from_raw((*this).env).unwrap() };
-        let context = utils::get_context(&env);
+
+        let context = utils::get_context(&mut env);
         updater::init_updater(&env, context);
         updater::check_for_updates();
 

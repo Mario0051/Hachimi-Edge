@@ -26,9 +26,9 @@ pub extern "C" fn JNI_OnLoad(vm: JavaVM, reserved: *mut c_void) -> jint {
     if !Hachimi::init() {
         return orig_fn(vm, reserved);
     }
-    let env = vm.get_env().unwrap();
+    let mut env = vm.get_env().unwrap();
 
-    let context = utils::get_context(&env);
+    let context = utils::get_context(&mut env);
     updater::init_updater(&env, context);
     updater::check_for_updates();
 

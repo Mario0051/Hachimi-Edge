@@ -120,7 +120,7 @@ fn download_and_install_thread_impl(url: String) {
         )
     };
 
-    let env = vm.attach_current_thread().unwrap();
+    let mut env = vm.attach_current_thread().unwrap();
     let context_obj = context.as_obj();
 
     let cache_dir_obj = env
@@ -232,8 +232,9 @@ fn download_and_install_thread_impl(url: String) {
     let mime_type = env
         .new_string("application/vnd.android.package-archive")
         .unwrap();
+
     env.call_method(
-        intent_obj,
+        &intent_obj,
         "setDataAndType",
         "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
         &[JValue::Object(&uri_obj), JValue::Object(&mime_type.into())],
@@ -242,8 +243,9 @@ fn download_and_install_thread_impl(url: String) {
 
     let flag_activity_new_task = 0x10000000;
     let flag_grant_read_uri = 0x00000001;
+
     env.call_method(
-        intent_obj,
+        &intent_obj,
         "addFlags",
         "(I)Landroid/content/Intent;",
         &[JValue::Int(flag_activity_new_task | flag_grant_read_uri)],

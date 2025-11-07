@@ -1,7 +1,7 @@
 use jni::objects::JObject;
 use jni::JNIEnv;
 
-pub fn get_context<'a>(env: &'a JNIEnv<'a>) -> JObject<'a> {
+pub fn get_context<'a>(env: &'a mut JNIEnv<'a>) -> JObject<'a> {
     let activity_thread_class = env
         .find_class("android/app/ActivityThread")
         .expect("Failed to find ActivityThread class");
