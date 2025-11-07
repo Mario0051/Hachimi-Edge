@@ -87,7 +87,7 @@ jobs:
       - name: Get release version
         id: get_info
         run: |
-          VERSION=$(curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/Cargo.toml" | \
+          VERSION=$(curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/android-autoupdater/Cargo.toml" | \
             awk '/^\[package\]/{flag=1} flag && /^version/{print $3; exit}' | \
             tr -d '"')
           echo "release_version=v$VERSION" >> $GITHUB_OUTPUT
