@@ -1,6 +1,10 @@
 name: Create Release
 
-on: workflow_dispatch
+on:
+  push:
+    branches: [ "android-autoupdater" ]
+
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -101,3 +105,19 @@ jobs:
             artifacts/android/*
             artifacts/windows/*
           tag_name: ${{ steps.get_info.outputs.release_version }}
+
+      - name: Generate GitHub App Token
+        id: get_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: mario0051
+          repositories: umpd-patcher
+
+      - name: Trigger UMPD-Patcher Workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ steps.get_token.outputs.token }}
+          repository: mario0051/umpd-patcher
+          event-type: build-patch
