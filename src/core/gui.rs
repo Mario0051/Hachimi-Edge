@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::RangeInclusive, sync::{atomic::{self, AtomicBool}, Arc, Mutex}, thread, time::Instant};
+use std::{borrow::Cow, ops::RangeInclusive, sync::{atomic::{self, AtomicBool, Ordering}, Arc, Mutex}, thread, time::Instant};
 
 use fnv::FnvHashSet;
 use once_cell::sync::OnceCell;
@@ -14,8 +14,9 @@ use crate::il2cpp::{
 
 #[cfg(not(target_os = "windows"))]
 use crate::il2cpp::hook::umamusume::WebViewManager;
+
+#[cfg(not(target_os = "windows"))]
 use crate::android::updater::{self, DownloadState, DOWNLOAD_REQUESTED};
-use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "windows")]
 use crate::il2cpp::hook::UnityEngine_CoreModule::QualitySettings;
