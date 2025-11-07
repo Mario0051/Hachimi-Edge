@@ -3,7 +3,7 @@ use std::os::raw::c_long;
 use jni::{objects::JString, JNIEnv};
 use once_cell::unsync::OnceCell;
 
-use crate::{android::{game_impl, hook, zygisk::{internal::{api_table, module_abi}, AppSpecializeArgs, ServerSpecializeArgs}}, core::{game::Region, Hachimi}};
+use crate::{android::{game_impl, hook, zygisk::{internal::{api_table, module_abi}, AppSpecializeArgs, ServerSpecializeArgs}, updater, utils}, core::{game::Region, Hachimi}};
 
 const ZYGISK_API_VERSION: c_long = 4;
 
@@ -44,6 +44,12 @@ unsafe extern "C" fn post_app_specialize(this: *mut Module, _args: *const AppSpe
         if !Hachimi::init() {
             return;
         }
+
+        let mut env = unsafe { JNIEnv::from_raw((*this).env).unwrap() };
+        let context = utils::get_context(&env);
+        updater::init_updater(&env, context);
+        updater::check_for_updates();
+
         hook::init((*this).env);
     }
 }

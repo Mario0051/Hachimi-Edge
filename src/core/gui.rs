@@ -14,6 +14,8 @@ use crate::il2cpp::{
 
 #[cfg(not(target_os = "windows"))]
 use crate::il2cpp::hook::umamusume::WebViewManager;
+use crate::android::updater::{self, DownloadState, DOWNLOAD_REQUESTED};
+use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "windows")]
 use crate::il2cpp::hook::UnityEngine_CoreModule::QualitySettings;
@@ -202,6 +204,11 @@ impl Gui {
         self.run_windows();
         self.run_notifications();
 
+        #[cfg(not(target_os = "windows"))]
+        if DOWNLOAD_REQUESTED.swap(false, Ordering::SeqCst) {
+            updater::trigger_download_and_install();
+        }
+
         if self.splash_visible { self.run_splash(); }
 
         // Store this as an atomic value so the input thread can check it without locking the gui
@@ -365,6 +372,41 @@ impl Gui {
                             })
                         }
                     }
+
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        ui.separator();
+                        ui.heading("Mod Updater");
+                        ui.horizontal(|ui| {
+                            let state = updater::DOWNLOAD_STATE.lock().clone();
+                            match state {
+                                DownloadState::Idle => {
+                                    ui.label(format!("v{} (Up to date)", env!("CARGO_PKG_VERSION")));
+                                }
+                                DownloadState::Checking => {
+                                    ui.label("Checking for updates...");
+                                }
+                                DownloadState::UpdateAvailable(info) => {
+                                    if ui.button(format!("Update to {}!", info.version)).clicked() {
+                                        DOWNLOAD_REQUESTED.store(true, Ordering::SeqCst);
+                                    }
+                                }
+                                DownloadState::Downloading(progress) => {
+                                    ui.label(progress);
+                                }
+                                DownloadState::Failed(err) => {
+                                    ui.label(format!("Update failed: {}", err));
+                                }
+                                DownloadState::Downloaded(_) => {
+                                    ui.label("Download complete. Triggering install...");
+                                }
+                                DownloadState::Installing => {
+                                    ui.label("Installer prompted. Please check system.");
+                                }
+                            }
+                        });
+                    }
+
                     ui.separator();
 
                     ui.heading(t!("menu.danger_zone_heading"));
@@ -1228,7 +1270,7 @@ impl Window for FirstTimeSetupWindow {
                                 let mut config = config.clone();
                                 config.language = language;
                                 save_and_reload_config(config);
-                            }   
+                            }
                         });
                         ui.label(t!("first_time_setup.welcome_content"));
                         true

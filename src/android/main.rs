@@ -3,6 +3,9 @@ use jni::{sys::jint, JavaVM};
 
 use crate::core::Hachimi;
 
+use super::utils;
+use crate::android::updater;
+
 use super::hook;
 
 #[allow(non_camel_case_types)]
@@ -24,6 +27,11 @@ pub extern "C" fn JNI_OnLoad(vm: JavaVM, reserved: *mut c_void) -> jint {
         return orig_fn(vm, reserved);
     }
     let env = vm.get_env().unwrap();
+
+    let context = utils::get_context(&env);
+    updater::init_updater(&env, context);
+    updater::check_for_updates();
+
     hook::init(env.get_raw());
 
     info!("JNI_OnLoad");
