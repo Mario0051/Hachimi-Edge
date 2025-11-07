@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 #[derive(Deserialize)]
 struct GitHubRelease {
@@ -183,7 +183,7 @@ fn download_and_install_thread_impl(url: String) {
         .new_object(
             "java/io/File",
             "(Ljava/lang/String;)V",
-            &[JValue::from(apk_path_jstr)],
+            &[JValue::Object(&apk_path_jstr.into())],
         )
         .unwrap();
 
@@ -208,7 +208,7 @@ fn download_and_install_thread_impl(url: String) {
             "(Landroid/content/Context;Ljava/lang/String;Ljava/io/File;)Landroid/net/Uri;",
             &[
                 JValue::Object(context_obj),
-                JValue::from(authority),
+                JValue::Object(&authority.into()),
                 JValue::Object(&file_obj),
             ],
         )
@@ -225,7 +225,7 @@ fn download_and_install_thread_impl(url: String) {
         .new_object(
             intent_class,
             "(Ljava/lang/String;)V",
-            &[JValue::from(action_view)],
+            &[JValue::Object(&action_view.into())],
         )
         .unwrap();
 
@@ -235,27 +235,4 @@ fn download_and_install_thread_impl(url: String) {
     env.call_method(
         intent_obj,
         "setDataAndType",
-        "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
-        &[JValue::Object(&uri_obj), JValue::from(mime_type)],
-    )
-    .unwrap();
-
-    let flag_activity_new_task = 0x10000000;
-    let flag_grant_read_uri = 0x00000001;
-    env.call_method(
-        intent_obj,
-        "addFlags",
-        "(I)Landroid/content/Intent;",
-        &[JValue::Int(flag_activity_new_task | flag_grant_read_uri)],
-    )
-    .unwrap();
-
-    env.call_method(
-        context_obj,
-        "startActivity",
-        "(Landroid/content/Intent;)V",
-        &[JValue::Object(&intent_obj)],
-    )
-    .unwrap();
-
-}
+        "(Landroid/net/Uri;Ljava/lang
