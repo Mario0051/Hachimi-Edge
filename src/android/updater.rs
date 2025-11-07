@@ -200,7 +200,34 @@ fn download_and_install_thread_impl(url: String) {
 
     let authority = env.new_string(format!("{}.provider", package_name_str)).unwrap();
 
-    let file_provider_class = env.find_class("androidx/core/content/FileProvider").unwrap();
+    let context_class = env.get_object_class(context_obj).unwrap();
+
+    let class_loader_obj = env
+        .call_method(
+            context_class,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+
+    let class_name_jstr = env.new_string("androidx.core.content.FileProvider").unwrap();
+
+    let file_provider_class_obj = env
+        .call_method(
+            &class_loader_obj,
+            "loadClass",
+            "(Ljava/lang/String;)Ljava/lang/Class;",
+            &[JValue::Object(&class_name_jstr.into())],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+
+    let file_provider_class = file_provider_class_obj.into();
+
     let uri_obj = env
         .call_static_method(
             file_provider_class,
