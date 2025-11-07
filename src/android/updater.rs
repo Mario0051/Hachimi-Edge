@@ -226,7 +226,7 @@ fn download_and_install_thread_impl(url: String) {
         .l()
         .unwrap();
 
-    let file_provider_class = file_provider_class_obj.into();
+    let file_provider_class: jni::objects::JClass<'_> = file_provider_class_obj.into();
 
     let uri_obj = env
         .call_static_method(
