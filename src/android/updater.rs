@@ -39,7 +39,7 @@ pub enum DownloadState {
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const GITHUB_API_URL: &str = "https://api.github.com/repos/Mario0051/UMPD-Patcher/releases/latest";
+const GITHUB_API_URL: Option<&str> = option_env!("HACHIMI_UPDATE_URL");
 const APK_ASSET_NAME: &str = "umamusume.apk";
 
 static mut JAVA_VM: Option<JavaVM> = None;
@@ -67,13 +67,18 @@ pub fn trigger_download_and_install() {
 }
 
 fn check_for_updates_thread_impl() {
+    let url = match GITHUB_API_URL {
+        Some(url) => url,
+        None => return,
+    };
+
     *DOWNLOAD_STATE.lock() = DownloadState::Checking;
 
     let client = reqwest::blocking::Client::builder()
         .user_agent(format!("hachimi-updater-v{}", CURRENT_VERSION))
         .build();
 
-    let resp = match client.and_then(|c| c.get(GITHUB_API_URL).send()) {
+    let resp = match client.and_then(|c| c.get(url).send()) {
         Ok(resp) => resp,
         Err(e) => {
             *DOWNLOAD_STATE.lock() = DownloadState::Failed(format!("Failed to fetch: {}", e));

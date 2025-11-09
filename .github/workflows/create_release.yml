@@ -22,6 +22,8 @@ jobs:
         run: chmod +x tools/android/build.sh
 
       - name: Build Hachimi for Android
+        env:
+          HACHIMI_UPDATE_URL: "https://api.github.com/repos/Mario0051/UMPD-Patcher/releases/latest"
         run: |
           rustup target add armv7-linux-androideabi aarch64-linux-android i686-linux-android x86_64-linux-android
           RELEASE=1 ./tools/android/build.sh
