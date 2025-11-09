@@ -4,10 +4,12 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use semver::Version;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use blake3::Hasher as Blake3Hasher;
 
 #[derive(Deserialize)]
 struct GitHubRelease {
@@ -15,7 +17,7 @@ struct GitHubRelease {
     assets: Vec<GitHubAsset>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
@@ -41,6 +43,7 @@ pub enum DownloadState {
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const GITHUB_API_URL: Option<&str> = option_env!("HACHIMI_UPDATE_URL");
 const APK_ASSET_NAME: &str = "umamusume.apk";
+const HASH_ASSET_NAME: &str = "blake3.json";
 
 static mut JAVA_VM: Option<JavaVM> = None;
 static mut APP_CONTEXT: Option<GlobalRef> = None;
@@ -66,6 +69,81 @@ pub fn trigger_download_and_install() {
     }
 }
 
+fn get_current_apk_path() -> Option<PathBuf> {
+    let (vm, context) = unsafe { (JAVA_VM.as_ref()?, APP_CONTEXT.as_ref()?) };
+    let mut env = vm.attach_current_thread().ok()?;
+    let context_obj = context.as_obj();
+
+    let package_name_jobject = env
+        .call_method(context_obj, "getPackageName", "()Ljava/lang/String;", &[])
+        .ok()?
+        .l()
+        .ok()?;
+
+    let package_manager_obj = env
+        .call_method(
+            context_obj,
+            "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+            &[],
+        )
+        .ok()?
+        .l()
+        .ok()?;
+
+    let package_info_obj = env
+        .call_method(
+            package_manager_obj,
+            "getPackageInfo",
+            "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;",
+            &[JValue::Object(&package_name_jobject), JValue::Int(0)],
+        )
+        .ok()?
+        .l()
+        .ok()?;
+
+    let app_info_obj = env
+        .get_field(
+            &package_info_obj,
+            "applicationInfo",
+            "Landroid/content/pm/ApplicationInfo;",
+        )
+        .ok()?
+        .l()
+        .ok()?;
+
+    let source_dir_jobject = env
+        .get_field(&app_info_obj, "sourceDir", "Ljava/lang/String;")
+        .ok()?
+        .l()
+        .ok()?;
+
+    let source_dir_path: String = env
+        .get_string(&source_dir_jobject.into())
+        .ok()?
+        .into();
+
+    Some(PathBuf::from(source_dir_path))
+}
+
+fn calculate_blake3(path: &PathBuf) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Blake3Hasher::new();
+    let mut buffer = [0; 8192];
+
+    loop {
+        let n = reader.read(&mut buffer).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    let hash_bytes = hasher.finalize();
+    Some(hash_bytes.to_hex().to_string())
+}
+
 fn check_for_updates_thread_impl() {
     let url = match GITHUB_API_URL {
         Some(url) => url,
@@ -78,7 +156,15 @@ fn check_for_updates_thread_impl() {
         .user_agent(format!("hachimi-updater-v{}", CURRENT_VERSION))
         .build();
 
-    let resp = match client.and_then(|c| c.get(url).send()) {
+    let client = match client {
+        Ok(c) => c,
+        Err(e) => {
+            *DOWNLOAD_STATE.lock() = DownloadState::Failed(format!("Failed to build client: {}", e));
+            return;
+        }
+    };
+
+    let resp = match client.get(url).send() {
         Ok(resp) => resp,
         Err(e) => {
             *DOWNLOAD_STATE.lock() = DownloadState::Failed(format!("Failed to fetch: {}", e));
@@ -98,15 +184,49 @@ fn check_for_updates_thread_impl() {
     let release_ver_str = release.tag_name.trim_start_matches('v');
     let release_ver = Version::parse(release_ver_str).unwrap_or(Version::new(0, 0, 0));
 
+    let apk_asset = match release.assets.iter().find(|a| a.name == APK_ASSET_NAME) {
+        Some(asset) => asset.clone(),
+        None => {
+            *DOWNLOAD_STATE.lock() = DownloadState::Failed(format!(
+                "Release {} found, but no '{}'",
+                release.tag_name, APK_ASSET_NAME
+            ));
+            return;
+        }
+    };
+
+    let update_info = UpdateInfo {
+        version: release.tag_name.clone(),
+        download_url: apk_asset.browser_download_url.clone(),
+    };
+
     if release_ver > current_ver {
-        if let Some(asset) = release.assets.iter().find(|a| a.name == APK_ASSET_NAME) {
-            *DOWNLOAD_STATE.lock() = DownloadState::UpdateAvailable(UpdateInfo {
-                version: release.tag_name,
-                download_url: asset.browser_download_url.clone(),
-            });
-        } else {
-            *DOWNLOAD_STATE.lock() =
-                DownloadState::Failed(format!("Release {} found, but no '{}'", release.tag_name, APK_ASSET_NAME));
+        *DOWNLOAD_STATE.lock() = DownloadState::UpdateAvailable(update_info);
+    } else if release_ver == current_ver {
+
+        let hash_asset = match release.assets.iter().find(|a| a.name == HASH_ASSET_NAME) {
+            Some(asset) => asset,
+            None => {
+                *DOWNLOAD_STATE.lock() = DownloadState::Idle;
+                return;
+            }
+        };
+
+        let remote_hash = (|| -> Option<String> {
+            let resp = client.get(&hash_asset.browser_download_url).send().ok()?;
+            let hashes: HashMap<String, String> = resp.json().ok()?;
+            hashes.get(APK_ASSET_NAME).cloned()
+        })();
+
+        let local_hash = get_current_apk_path().and_then(|path| calculate_blake3(&path));
+
+        match (remote_hash, local_hash) {
+            (Some(remote), Some(local)) if remote != local => {
+                *DOWNLOAD_STATE.lock() = DownloadState::UpdateAvailable(update_info);
+            }
+            _ => {
+                *DOWNLOAD_STATE.lock() = DownloadState::Idle;
+            }
         }
     } else {
         *DOWNLOAD_STATE.lock() = DownloadState::Idle;
@@ -291,5 +411,4 @@ fn download_and_install_thread_impl(url: String) {
         &[JValue::Object(&intent_obj)],
     )
     .unwrap();
-
 }
