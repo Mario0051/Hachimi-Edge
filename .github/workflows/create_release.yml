@@ -11,6 +11,8 @@ jobs:
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
     steps:
       - uses: actions/checkout@v5
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
 
       - name: Grant execute permission to build script
         run: chmod +x tools/android/build.sh
@@ -33,9 +35,10 @@ jobs:
   build-windows:
     runs-on: windows-latest
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
-    needs: build-android
     steps:
       - uses: actions/checkout@v5
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
 
       - name: Build Hachimi for Windows
         run: |
@@ -77,24 +80,59 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Get release version
         id: get_info
         run: |
           VERSION=$(curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/main/Cargo.toml" | \
             awk '/^\[package\]/{flag=1} flag && /^version/{print $3; exit}' | \
             tr -d '"')
-          echo "release_version=v$VERSION" >> $GITHUB_OUTPUT
+          echo "RELEASE_VERSION=v$VERSION" >> $GITHUB_ENV
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v5
         with:
           path: artifacts
 
+      - name: Create release notes
+        run: |
+          if ! git rev-parse "$LATEST_TAG" >/dev/null 2>&1; then
+            git tag $LATEST_TAG
+          fi
+  
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${LATEST_TAG}^")
+          if [ -z "$PREVIOUS_TAG" ]; then
+              PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+  
+          echo "## What's Changed" > CHANGELOG.md
+          COMMIT_HASHES=$(git rev-list --no-merges ${PREVIOUS_TAG}..${LATEST_TAG})
+          
+          for hash in $COMMIT_HASHES; do
+            raw_message=$(git show -s --format=%B $hash)
+            subject=$(echo "$raw_message" | head -n 1)
+            body=$(echo "$raw_message" | tail -n +2)
+            author=$(git show -s --format=%an $hash)
+            short_hash=$(git show -s --format=%h $hash)
+            final_message="$subject"
+  
+            if [ -n "$body" ]; then
+              formatted_body=$(echo "$body" | paste -sd ", " -)
+              final_message="$final_message ($formatted_body)"
+            fi
+  
+            echo "* $final_message by @$author in $short_hash" >> CHANGELOG.md
+          done
+        env:
+          LATEST_TAG: ${{ env.RELEASE_VERSION }}
+
       - name: Upload binaries to a release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: CHANGELOG.md
           files: |
             artifacts/android/*
             artifacts/windows/*
-          tag_name: ${{ steps.get_info.outputs.release_version }}
+          tag_name: ${{ env.RELEASE_VERSION }}

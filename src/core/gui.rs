@@ -3,6 +3,7 @@ use std::{borrow::Cow, ops::RangeInclusive, sync::{atomic::{self, AtomicBool}, A
 use fnv::FnvHashSet;
 use once_cell::sync::OnceCell;
 use rust_i18n::t;
+use chrono::{Utc, Datelike};
 
 use crate::il2cpp::{
     hook::{
@@ -1330,7 +1331,7 @@ impl Window for AboutWindow {
                     ui.label(env!("HACHIMI_DISPLAY_VERSION"));
                 });
             });
-            ui.label(t!("about.copyright"));
+            ui.label(t!("about.copyright", year = Utc::now().year()));
             ui.horizontal(|ui| {
                 if ui.button(t!("about.view_license")).clicked() {
                     thread::spawn(|| {
