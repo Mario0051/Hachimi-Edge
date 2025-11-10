@@ -143,7 +143,6 @@ jobs:
             artifacts/windows/*
           tag_name: ${{ env.RELEASE_VERSION }}
 
-
       - name: Generate GitHub App Token
         id: get_token
         uses: actions/create-github-app-token@v1

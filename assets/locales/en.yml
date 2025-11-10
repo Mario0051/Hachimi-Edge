@@ -87,7 +87,7 @@ first_time_setup:
 
 about:
   title: "About"
-  copyright: "© 2024-2025 LeadRDRK and contributors"
+  copyright: "© 2024-%{year} LeadRDRK and contributors"
   view_license: "View license"
   check_for_updates: "Check for updates"
 
