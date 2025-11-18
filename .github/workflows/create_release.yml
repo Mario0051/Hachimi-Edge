@@ -20,7 +20,7 @@ jobs:
 
       - name: Grant execute permission to build script
         run: chmod +x tools/android/build.sh
-
+      - uses: dtolnay/rust-toolchain@stable
       - name: Build Hachimi for Android
         env:
           HACHIMI_UPDATE_URL: "https://api.github.com/repos/Mario0051/UMPD-Patcher/releases/latest"
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
-
+      - uses: dtolnay/rust-toolchain@stable
       - name: Build Hachimi for Windows
         run: |
           cargo build --target x86_64-pc-windows-msvc --target-dir build --release
