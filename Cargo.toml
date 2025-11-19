@@ -1,6 +1,6 @@
 [package]
 name = "hachimi"
-version = "0.15.2"
+version = "0.16.0"
 rust-version = "1.91.1"
 edition = "2021"
 build = "build.rs"
@@ -35,7 +35,7 @@ atomic_float = "0.1"
 blake3 = "1.5"
 ureq = { version = "2.10", default-features = false, features = ["native-tls", "json"] }
 size = "0.4"
-threadpool = "1.8"
+thread-priority = "3.0.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 unicode-width = "0.1"
 tiny_http = "0.12"

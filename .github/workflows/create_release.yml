@@ -19,18 +19,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Hachimi for Android
         run: |
-          rustup target add armv7-linux-androideabi aarch64-linux-android i686-linux-android x86_64-linux-android
+          rustup target add armv7-linux-androideabi aarch64-linux-android
           RELEASE=1 ./tools/android/build.sh
-          RELEASE=1 ./tools/android/build_zygisk.sh
 
       - name: Upload Android binaries
         uses: actions/upload-artifact@v4
         with:
           name: android
           path: |
-            build/zygisk-hachimi-*-release.zip
             build/*.so
-            build/sha1.json
+            build/sha256.json
           
   build-windows:
     runs-on: windows-latest
@@ -101,30 +99,37 @@ jobs:
           if ! git rev-parse "$LATEST_TAG" >/dev/null 2>&1; then
             git tag $LATEST_TAG
           fi
-  
+
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${LATEST_TAG}^")
           if [ -z "$PREVIOUS_TAG" ]; then
-              PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
-  
+
           echo "## What's Changed" > CHANGELOG.md
           COMMIT_HASHES=$(git rev-list --no-merges ${PREVIOUS_TAG}..${LATEST_TAG})
-          
+
+          IFS=$'\n'
+
           for hash in $COMMIT_HASHES; do
-            raw_message=$(git show -s --format=%B $hash)
-            subject=$(echo "$raw_message" | head -n 1)
-            body=$(echo "$raw_message" | tail -n +2)
+            subject=$(git show -s --format=%s $hash)
+            body=$(git show -s --format=%b $hash)
             author=$(git show -s --format=%an $hash)
             short_hash=$(git show -s --format=%h $hash)
-            final_message="$subject"
-  
+
+            echo "* **$subject**" >> CHANGELOG.md
+
             if [ -n "$body" ]; then
-              formatted_body=$(echo "$body" | paste -sd ", " -)
-              final_message="$final_message ($formatted_body)"
+              echo "$body" | while read -r line; do
+                if [ -z "$line" ]; then continue; fi
+                clean_line=$(echo "$line" | sed -E 's/^[ \t]*[-*+][ \t]*//')
+                echo "    * $clean_line" >> CHANGELOG.md
+              done
             fi
-  
-            echo "* $final_message by @$author in $short_hash" >> CHANGELOG.md
+            echo "    (by @$author in $short_hash)" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
           done
+
+          unset IFS
         env:
           LATEST_TAG: ${{ env.RELEASE_VERSION }}
 
