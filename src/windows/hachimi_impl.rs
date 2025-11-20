@@ -72,13 +72,16 @@ pub struct Config {
     #[serde(default)]
     pub block_minimize_in_full_screen: bool,
     #[serde(default)]
-    pub window_always_on_top: bool
+    pub window_always_on_top: bool,
+    #[serde(default = "Config::default_true")]
+    pub discord_rpc: bool
 }
 
 impl Config {
     fn default_vsync_count() -> i32 { -1 }
     fn default_menu_open_key() -> u16 { windows::Win32::UI::Input::KeyboardAndMouse::VK_RIGHT.0 }
     fn default_hide_ingame_ui_hotkey_bind() -> u16 { windows::Win32::UI::Input::KeyboardAndMouse::VK_INSERT.0 }
+    fn default_true() -> bool { true }
 }
 
 #[derive(Deserialize, Serialize, Copy, Clone, Default, Eq, PartialEq)]

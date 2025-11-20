@@ -13,7 +13,7 @@ use windows::{core::w, Win32::{
 
 use crate::{core::{game::Region, Gui, Hachimi}, il2cpp::{hook::{umamusume::SceneManager, UnityEngine_CoreModule}, symbols::Thread}, windows::utils};
 
-use super::gui_impl::input;
+use super::{gui_impl::input, discord};
 
 static TARGET_HWND: AtomicIsize = AtomicIsize::new(0);
 pub fn get_target_hwnd() -> HWND {
@@ -132,6 +132,12 @@ pub fn init() {
         if hachimi.window_always_on_top.load(atomic::Ordering::Relaxed) {
             _ = utils::set_window_topmost(hwnd, true);
         }
+
+        if hachimi.discord_rpc.load(atomic::Ordering::Relaxed) {
+            if let Err(e) = discord::start_rpc() {
+                 error!("{}", e);
+             }
+        }
     }
 }
 
@@ -143,6 +149,9 @@ pub fn uninit() {
                 error!("Failed to remove CBT hook: {}", e);
             }
             HCBTHOOK = HHOOK(0);
+        }
+        if let Err(e) = discord::stop_rpc() {
+            error!("{}", e);
         }
     }
 }

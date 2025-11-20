@@ -318,7 +318,7 @@ impl Gui {
                     });
                     #[cfg(target_os = "windows")]
                     {
-                        use crate::windows::{utils::set_window_topmost, wnd_hook};
+                        use crate::windows::{discord, utils::set_window_topmost, wnd_hook};
 
                         ui.horizontal(|ui| {
                             let prev_value = self.menu_vsync_value;
@@ -343,6 +343,17 @@ impl Gui {
                                     let topmost = Hachimi::instance().window_always_on_top.load(atomic::Ordering::Relaxed);
                                     unsafe { _ = set_window_topmost(wnd_hook::get_target_hwnd(), topmost); }
                                 });
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            let mut value = hachimi.discord_rpc.load(atomic::Ordering::Relaxed);
+                            
+                            ui.label(t!("menu.discord_rpc"));
+                            if ui.checkbox(&mut value, "").changed() {
+                                hachimi.discord_rpc.store(value, atomic::Ordering::Relaxed);
+                                if let Err(e) = if value { discord::start_rpc() } else { discord::stop_rpc() } {
+                                    error!("{}", e);
+                                }
                             }
                         });
                     }
@@ -1024,6 +1035,13 @@ impl ConfigEditor {
                     }
                 }
                 ui.end_row();
+
+                #[cfg(target_os = "windows")]
+                {
+                    ui.label(t!("config_editor.discord_rpc"));
+                    ui.checkbox(&mut config.windows.discord_rpc, "");
+                    ui.end_row();
+                }
 
                 ui.label(t!("config_editor.debug_mode"));
                 ui.checkbox(&mut config.debug_mode, "");

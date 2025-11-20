@@ -52,6 +52,7 @@ menu:
   soft_restart: "\uf021 Soft restart"
   open_in_game_browser: "\uf0ac Open in-game browser"
   toggle_game_ui: "\uf06e Toggle game UI"
+  discord_rpc: "Discord RPC"
 
 notification:
   saved_localize_dump: "Saved to localize_dump.json"
@@ -154,6 +155,7 @@ config_editor:
     This option allows a shortcut key to toggle the ingame UI.
     For Android, it's double tap the Volume Up key within 0.3 seconds.
     For PC/Android with keyboard, it's the Insert key. This key can also be changed in the config file.
+  discord_rpc: "Discord RPC"
 
 tl_update_dialog:
   title: "New update available"
