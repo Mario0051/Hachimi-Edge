@@ -70,6 +70,13 @@ impl Parser {
     }
 
     fn parse_token(input: &str) -> Option<Token> {
+        // Strip leading/trailing whitespace (including newlines, tabs, etc.)
+        let input = input.trim();
+
+        if input.is_empty() {
+            return None;
+        }
+
         let mut iter = input.chars();
         let start_char = iter.next().unwrap(); // guaranteed to have at least one char
         let end_char = iter.last();
@@ -78,7 +85,7 @@ impl Parser {
             return Some(Token::StringLit(input[1..input.len() - 1].replace("\\'", "'")));
         }
 
-        if start_char.is_numeric() {
+        if start_char.is_numeric() || (start_char == '-' && input.len() > 1) {
             return if let Ok(number) = input.parse::<f64>() {
                 Some(Token::NumberLit(number))
             }
@@ -162,7 +169,8 @@ impl Parser {
                         in_filter = false;
                     },
 
-                    b' ' => if !in_string && token_start != 0 {
+                    // Treat newlines, tabs, and other whitespace like spaces
+                    b' ' | b'\n' | b'\r' | b'\t' => if !in_string && token_start != 0 {
                         let res = Self::parse_token(&input[token_start..i]);
                         if let Some(token) = res {
                             tokens.push(token);
