@@ -41,7 +41,7 @@
 - **跨平台支持：** 专为多平台设计，支持 Windows 和 Android 系统。
 
 # 安装指南
-请参阅[入门指南](https://hachimi.leadrdrk.com/docs/hachimi/getting-started.html)。
+请参阅[入门指南](https://hachimi.noccu.art/zh-cn/docs/hachimi/getting-started.html)。
 
 # 特别鸣谢
 以下项目为 Hachimi 的开发奠定了重要基础，如果没有它们，Hachimi 不会有今天如此成就：

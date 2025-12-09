@@ -41,7 +41,7 @@ Do what you must, but we would respectfully request that you try to label the ga
 - **Cross-platform:** Designed from the ground up to be portable, with Windows and Android support.
 
 # Installation
-Please see the [Getting started](https://hachimi.leadrdrk.com/docs/hachimi/getting-started.html) page.
+Please see the [Getting started](https://hachimi.noccu.art/docs/hachimi/getting-started.html) page.
 
 # Special thanks
 These projects have been the basis for Hachimi's development; without them, Hachimi would never have existed in its current form:
