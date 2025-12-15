@@ -120,7 +120,17 @@ impl Gui {
 
             splash_visible: true,
             splash_tween: TweenInOutWithDelay::new(0.8, 3.0, Easing::OutQuad),
-            splash_sub_str: t!("splash_sub", open_key_str = t!(open_key_id)).into_owned(),
+            splash_sub_str: {
+                #[cfg(target_os = "windows")]
+                {
+                    let key_label = crate::windows::utils::vk_to_display_label(hachimi.config.load().windows.menu_open_key);
+                    t!("splash_sub", open_key_str = key_label).into_owned()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    t!("splash_sub", open_key_str = t!(open_key_id)).into_owned()
+                }
+            },
 
             menu_visible: false,
             menu_anim_time: None,
@@ -160,8 +170,28 @@ impl Gui {
     }
 
     pub fn set_screen_size(&mut self, width: i32, height: i32) {
-        let main_axis_size = if width < height { width } else { height };
-        let pixels_per_point = main_axis_size as f32 * PIXELS_PER_POINT_RATIO;
+        let is_landscape = width > height;
+
+        let main_axis_size = if is_landscape {
+            height
+        } else {
+            width
+        };
+
+        let scaling_ratio = if is_landscape {
+            #[cfg(target_os = "android")]
+            {
+                PIXELS_PER_POINT_RATIO  // Android uses default (3.0/1080.0)
+            }
+            #[cfg(target_os = "windows")]
+            {
+                1.5 / 1080.0  // Windows scaling
+            }
+        } else {
+            PIXELS_PER_POINT_RATIO  // 3.0/1080.0
+        };
+
+        let pixels_per_point = main_axis_size as f32 * scaling_ratio;
         self.context.set_pixels_per_point(pixels_per_point);
 
         self.input.screen_rect = Some(egui::Rect {
@@ -312,7 +342,7 @@ impl Gui {
                     });
                     #[cfg(target_os = "windows")]
                     {
-                        use crate::windows::{utils::set_window_topmost, wnd_hook};
+                        use crate::windows::{discord, utils::set_window_topmost, wnd_hook};
 
                         ui.horizontal(|ui| {
                             let prev_value = self.menu_vsync_value;
@@ -337,6 +367,17 @@ impl Gui {
                                     let topmost = Hachimi::instance().window_always_on_top.load(atomic::Ordering::Relaxed);
                                     unsafe { _ = set_window_topmost(wnd_hook::get_target_hwnd(), topmost); }
                                 });
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            let mut value = hachimi.discord_rpc.load(atomic::Ordering::Relaxed);
+                            
+                            ui.label(t!("menu.discord_rpc"));
+                            if ui.checkbox(&mut value, "").changed() {
+                                hachimi.discord_rpc.store(value, atomic::Ordering::Relaxed);
+                                if let Err(e) = if value { discord::start_rpc() } else { discord::stop_rpc() } {
+                                    error!("{}", e);
+                                }
                             }
                         });
                     }
@@ -984,6 +1025,27 @@ impl ConfigEditor {
                 }
                 ui.end_row();
 
+                #[cfg(target_os = "windows")]
+                {
+                    ui.label(t!("config_editor.discord_rpc"));
+                    ui.checkbox(&mut config.windows.discord_rpc, "");
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.menu_open_key"));
+                    ui.horizontal(|ui| {
+                        ui.label(crate::windows::utils::vk_to_display_label(config.windows.menu_open_key));
+                        if ui.button(t!("config_editor.menu_open_key_set")).clicked() {
+                            crate::windows::wnd_hook::start_menu_key_capture();
+                            thread::spawn(|| {
+                                Gui::instance().unwrap()
+                                .lock().unwrap()
+                                .show_notification(&t!("notification.press_to_set_menu_key"));
+                            });
+                        }
+                    });
+                    ui.end_row();
+                }
+
                 ui.label(t!("config_editor.debug_mode"));
                 ui.checkbox(&mut config.debug_mode, "");
                 ui.end_row();
@@ -1169,6 +1231,10 @@ impl Window for ConfigEditor {
         let mut open = true;
         let mut open2 = true;
         let mut config = self.config.clone();
+        #[cfg(target_os = "windows")]
+        {
+            config.windows.menu_open_key = Hachimi::instance().config.load().windows.menu_open_key;
+        }
         let mut reset_clicked = false;
 
         new_window(ctx, t!("config_editor.title"))

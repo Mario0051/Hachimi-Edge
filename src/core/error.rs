@@ -16,6 +16,7 @@ pub enum Error {
     OutOfDiskSpace,
     FileHashMismatch(String),
     ZipError(zip::result::ZipError),
+    DiscordRpcError(String),
     RuntimeError(String),
     AlreadyHooked,
 }
@@ -61,6 +62,9 @@ impl fmt::Display for Error {
             }
             Error::ZipError(error) => {
                 write!(f, "Zip error: {}", error)
+            },
+            Error::DiscordRpcError(msg) => {
+                write!(f, "Discord RPC Error: {}", msg)
             },
             Error::RuntimeError(msg) => {
                 write!(f, "{}", msg)
