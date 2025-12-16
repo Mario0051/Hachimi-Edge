@@ -147,6 +147,7 @@ config_editor:
 tl_update_dialog:
   title: "有可用的更新"
   content: "有可用的更新 (%{size})，是否要下載？"
+  content_zip_warning: "有新的翻譯更新可用（%{changed_size}）。此更新將改為下載完整的封存檔（%{download_size}）。"
 
 update_prompt_dialog:
   title: "有可用的更新"

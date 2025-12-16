@@ -165,6 +165,7 @@ config_editor:
 tl_update_dialog:
   title: "New update available"
   content: "A new translation update is available (%{size}). Do you want to download it?"
+  content_zip_warning: "A new translation update is available (%{changed_size}). This update will download the full archive (%{download_size}) instead."
 
 update_prompt_dialog:
   title: "New update available"
