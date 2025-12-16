@@ -162,6 +162,7 @@ config_editor:
 tl_update_dialog:
   title: "新翻译更新可用"
   content: "新的翻译更新可用 (%{size})，是否下载？"
+  content_zip_warning: "有新的翻译更新可用（%{changed_size}）。此更新将改为下载完整的存档（%{download_size}）。"
 
 update_prompt_dialog:
   title: "新版本可用"

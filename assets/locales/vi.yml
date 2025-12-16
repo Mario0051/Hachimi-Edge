@@ -141,6 +141,7 @@ config_editor:
 tl_update_dialog:
   title: "Bản cập nhật mới"
   content: "Đã có bản cập nhật bản dịch mới (%{size}). Bạn có muốn tải về không?"
+  content_zip_warning: "Đã có bản cập nhật dịch thuật mới (%{changed_size}). Bản cập nhật này sẽ tải về toàn bộ tệp lưu trữ (%{download_size}) thay thế."
 
 update_prompt_dialog:
   title: "Bản cập nhật mới"
