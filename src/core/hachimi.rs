@@ -372,7 +372,10 @@ pub enum Language {
     SChinese,
 
     #[serde(rename = "vi")]
-    Vietnamese
+    Vietnamese,
+
+    #[serde(rename = "es")]
+    Spanish
 }
 
 impl Language {
@@ -380,7 +383,8 @@ impl Language {
         Self::English.choice(),
         Self::TChinese.choice(),
         Self::SChinese.choice(),
-        Self::Vietnamese.choice()
+        Self::Vietnamese.choice(),
+        Self::Spanish.choice()
     ];
 
     pub fn set_locale(&self) {
@@ -392,7 +396,8 @@ impl Language {
             Language::English => "en",
             Language::TChinese => "zh-tw",
             Language::SChinese => "zh-cn",
-            Language::Vietnamese => "vi"
+            Language::Vietnamese => "vi",
+            Language::Spanish => "es"
         }
     }
 
@@ -401,7 +406,8 @@ impl Language {
             Language::English => "English",
             Language::TChinese => "繁體中文",
             Language::SChinese => "简体中文",
-            Language::Vietnamese => "Tiếng Việt"
+            Language::Vietnamese => "Tiếng Việt",
+            Language::Spanish => "Español (ES)"
         }
     }
 
