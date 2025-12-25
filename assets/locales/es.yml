@@ -164,6 +164,8 @@ config_editor:
   discord_rpc: "Discord RPC"
   menu_open_key: "Tecla para abrir menú"
   menu_open_key_set: "Establecer"
+  render_scale: "Escala de renderizado"
+  aniso_level: "Filtrado anisotrópico"
 
 tl_update_dialog:
   title: "Nueva actualización disponible"
