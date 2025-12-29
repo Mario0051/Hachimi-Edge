@@ -1145,6 +1145,10 @@ impl ConfigEditor {
                 }
                 ui.end_row();
 
+                ui.label(t!("config_editor.gui_scale"));
+                ui.add(egui::Slider::new(&mut config.gui_scale, 0.25..=2.0).step_by(0.05));
+                ui.end_row();
+
                 #[cfg(target_os = "windows")]
                 {
                     ui.label(t!("config_editor.discord_rpc"));
@@ -1236,10 +1240,6 @@ impl ConfigEditor {
 
                 ui.label(t!("config_editor.ui_scale"));
                 ui.add(egui::Slider::new(&mut config.ui_scale, 0.1..=10.0).step_by(0.05));
-                ui.end_row();
-
-                ui.label(t!("config_editor.gui_scale"));
-                ui.add(egui::Slider::new(&mut config.gui_scale, 0.25..=2.0).step_by(0.05));
                 ui.end_row();
 
                 ui.label(t!("config_editor.ui_animation_scale"));
