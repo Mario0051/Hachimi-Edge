@@ -1,6 +1,6 @@
 [package]
 name = "hachimi"
-version = "0.21.2"
+version = "0.21.4"
 rust-version = "1.91.1"
 edition = "2021"
 
@@ -35,17 +35,19 @@ atomic_float = "0.1"
 blake3 = "1.5"
 ureq = { version = "2.10", features = ["json"] }
 size = "0.4"
+memmap2 = "0.9.9"
 thread-priority = "3.0.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 unicode-width = "0.1"
 tiny_http = "0.12"
 rust-i18n = "3.1"
+sys-locale = "0.3.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 libc = "0.2"
 android_logger = "0.15.1"
 procfs = "0.16"
-jni = "0.21"
+jni = "0.21.1"
 egui_glow = "0.33.2"
 glow = "0.16"
 dobby-rs = "0.1"
