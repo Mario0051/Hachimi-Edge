@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{atomic::{self, AtomicUsize, AtomicBool}, mpsc, Arc, Mutex}, thread, cmp::max};
+use std::{collections::HashSet, fs, io::{Read, Write, Cursor}, path::{Path, PathBuf}, sync::{atomic::{self, AtomicUsize, AtomicBool}, mpsc, Arc, Mutex}, thread, cmp::max};
 
 use arc_swap::ArcSwap;
 use fnv::FnvHashMap;
@@ -227,25 +227,26 @@ impl Updater {
                 continue;
             }
 
+            let path = ld_dir_path.as_ref().map(|p| p.join(&file.path));
+            let exists = path.as_ref().map(|p| p.is_file()).unwrap_or(false);
+
             let updated = if is_new_repo {
                 // redownload every single file because the directory will be deleted
                 true
-            } else if !pedantic && excludes.contains(&file.path) {
-                // skip excluded files unless pedantic update
+            } else if !pedantic && exists && excludes.contains(&file.path) {
+                // skip excluded file unless pedantic update or the file doesn't exist in the system
                 false
             } else if let Some(hash) = repo_cache.files.get(&file.path) {
                 // get path or force download if path is invalid
-                let path = ld_dir_path.as_ref().map(|p| p.join(&file.path));
-
                 if let Some(path) = path {
                     // file doesn't exist -> download
-                    if !path.is_file() {
+                    if !exists {
                         true
                     } else {
                         // fast size check to catch interrupted downloads
                         let metadata = fs::metadata(&path).ok();
                         let size_mismatch = metadata.map(|m| m.len() as usize != file.size).unwrap_or(true);
-    
+        
                         if size_mismatch {
                             true // size mismatch -> redownload
                         } else if hash != &file.hash {
@@ -577,7 +578,8 @@ impl Updater {
             );
 
             let zip_file = fs::File::open(&zip_path)?;
-            let zip_archive = Arc::new(Mutex::new(zip::ZipArchive::new(zip_file)?));
+            let mmap = Arc::new(unsafe { memmap2::Mmap::map(&zip_file)? });
+
             let total_size = update_info.size;
             let current_bytes = Arc::new(AtomicUsize::new(0));
             let non_fatal_error_count = Arc::new(AtomicUsize::new(0));
@@ -587,9 +589,10 @@ impl Updater {
             let (sender, receiver) = mpsc::channel::<usize>();
             let receiver = Arc::new(Mutex::new(receiver));
             let mut handles = Vec::with_capacity(*NUM_THREADS);
+
             for _ in 0..*NUM_THREADS {
                 let updater = self.clone();
-                let zip_archive_clone = Arc::clone(&zip_archive);
+                let mmap_thread = Arc::clone(&mmap);
                 let files_to_extract_clone = Arc::clone(&files_to_extract);
                 let localized_data_dir_clone = localized_data_dir.to_path_buf();
                 let cached_files_clone = Arc::clone(&cached_files);
@@ -606,14 +609,18 @@ impl Updater {
                             warn!("Failed to set background thread priority for zip extractor.");
                         }
 
+                        let mut archive = match zip::ZipArchive::new(Cursor::new(&mmap_thread[..])) {
+                            Ok(a) => a,
+                            Err(_) => return,
+                        };
+
                         let mut buffer = vec![0u8; CHUNK_SIZE];
                         let mut hasher = blake3::Hasher::new();
 
                         while let Ok(i) = receiver_clone.lock().unwrap().recv() {
                             if stop_signal_clone.load(atomic::Ordering::Relaxed) { break; }
-                            let mut archive_guard = zip_archive_clone.lock().unwrap();
-                            
-                            let mut zip_entry = match archive_guard.by_index(i) {
+
+                            let mut zip_entry = match archive.by_index(i) {
                                 Ok(entry) => entry,
                                 Err(_) => {
                                     non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
@@ -678,7 +685,7 @@ impl Updater {
                 handles.push(handle);
             }
 
-            let zip_len = zip_archive.lock().unwrap().len();
+            let zip_len = zip::ZipArchive::new(Cursor::new(&mmap[..]))?.len();
             for i in 0..zip_len {
                 if sender.send(i).is_err() { break; }
             }

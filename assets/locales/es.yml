@@ -68,6 +68,8 @@ notification:
   no_updates: "No hay actualizaciones."
   press_to_set_menu_key: "Pulsa una tecla para establecer la tecla que abre el menú."
   menu_open_key_set: "Tecla para abrir el menú: %{key}"
+  ipc_softreset_exec: "Reinicio suave (IPC) ejecutado con éxito."
+
 
 first_time_setup:
   title: "Instalación Inicial"
@@ -136,7 +138,7 @@ config_editor:
   target_fps: "FPS objetivo"
   virtual_resolution_multiplier: "Multiplicador de\nresolución virtual"
   ui_scale: "Escala del UI"
-  gui_scale: "Escala de la superposición"
+  gui_scale: "Escala del overlay"
   ui_animation_scale: "Escala de\nanimación del UI"
   graphics_quality: "Calidad gráfica"
   vsync: "VSync"

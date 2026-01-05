@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "hachimi"
-version = "0.21.2"
+version = "0.21.4"
 dependencies = [
  "android_logger",
  "arc-swap",
@@ -653,6 +653,7 @@ dependencies = [
  "jni",
  "libc",
  "log",
+ "memmap2",
  "minhook",
  "once_cell",
  "pelite",
@@ -663,6 +664,7 @@ dependencies = [
  "serde_json",
  "size",
  "sqlparser",
+ "sys-locale",
  "tauri-winres",
  "textwrap",
  "thread-priority",
@@ -949,6 +951,15 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+
+[[package]]
+name = "memmap2"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "memoffset"
@@ -1557,6 +1568,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.109",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
