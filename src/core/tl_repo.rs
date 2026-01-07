@@ -8,7 +8,7 @@ use size::Size;
 use thread_priority::{ThreadBuilderExt, ThreadPriority};
 
 use crate::core::game::Region;
-use super::{gui::SimpleYesNoDialog, hachimi::LocalizedData, http::{self, AsyncRequest}, utils, Error, Gui, Hachimi};
+use super::{gui::SimpleYesNoDialog, hachimi::{LocalizedData, Language}, http::{self, AsyncRequest}, utils, Error, Gui, Hachimi};
 use once_cell::sync::Lazy;
 
 #[derive(Deserialize)]
@@ -16,6 +16,8 @@ pub struct RepoInfo {
     pub name: String,
     pub index: String,
     pub short_desc: Option<String>,
+    #[serde(default)]
+    pub language: Option<Language>,
     #[serde(default)]
     pub region: Region
 }

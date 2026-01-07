@@ -420,6 +420,8 @@ impl Language {
         Self::Spanish.choice()
     ];
 
+
+
     pub fn set_locale(&self) {
         rust_i18n::set_locale(self.locale_str());
     }
