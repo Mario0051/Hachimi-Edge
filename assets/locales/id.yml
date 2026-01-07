@@ -72,7 +72,7 @@ notification:
 
 first_time_setup:
   title: "Pengaturan Pertama"
-  welcome_heading: "Selamat datang"
+  welcome_heading: "Selamat Datang"
   welcome_content: >-
     Hachimi kini telah terpasang! Ini akan mengantarmu pada proses pengaturan awal.
     Jika kamu tidak tertarik pada fitur translasi, kamu bisa melewatinya dengan menutup dialog ini.
@@ -173,9 +173,7 @@ tl_update_dialog:
 
 update_prompt_dialog:
   title: "Pembaruan tersedia"
-  content: |
-    Pembaruan Hachimi tersedia untuk versi (%{version}).\nApa kamu ingin memasangnya?
-    Gim akan dimulai ulang sebagai proses penerapan pembaruan.
+  content: "Pembaruan Hachimi tersedia untuk versi (%{version}).\nApa kamu ingin memasangnya?\n\nGim akan dimulai ulang sebagai proses penerapan pembaruan."
 
 updating_dialog:
   title: "Memperbarui"

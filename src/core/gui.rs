@@ -1455,6 +1455,13 @@ impl FirstTimeSetupWindow {
             current_tl_repo: None
         }
     }
+    
+    /// Find and return the index of the first repo that matches current Hachimi language
+    fn find_matched_repo_index(repo_list: &[RepoInfo], current_language: Language) -> Option<String> {
+        repo_list.iter()
+            .find(|repo| repo.language.as_ref().map_or(false, |l| *l == current_language))
+            .map(|repo| repo.index.clone())
+    }
 }
 
 impl Window for FirstTimeSetupWindow {
@@ -1499,9 +1506,29 @@ impl Window for FirstTimeSetupWindow {
                         ui.add_space(4.0);
 
                         async_request_ui_content(ui, self.index_request.clone(), |ui, repo_list| {
-                            let filtered_repos: Vec<_> = repo_list.iter()
-                                .filter(|repo| repo.region == Hachimi::instance().game.region)
+                            let hachimi = Hachimi::instance();
+                            let current_language = hachimi.config.load().language;
+                            
+                            // Auto-select matched repo if not yet selected
+                            if self.current_tl_repo.is_none() {
+                                if let Some(matched_index) = FirstTimeSetupWindow::find_matched_repo_index(repo_list, current_language) {
+                                    self.current_tl_repo = Some(matched_index);
+                                }
+                            }
+                            
+                            let mut filtered_repos: Vec<_> = repo_list.iter()
+                                .filter(|repo| repo.region == hachimi.game.region)
                                 .collect();
+                            
+                            // Sort: explicitly-matching language first, then others
+                            filtered_repos.sort_by_key(|repo| {
+                                if repo.language.as_ref().map_or(false, |l| *l == current_language) {
+                                    0
+                                } else {
+                                    1
+                                }
+                            });
+                            
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 egui::Frame::NONE
                                 .inner_margin(egui::Margin::symmetric(8, 0))
@@ -1510,12 +1537,37 @@ impl Window for FirstTimeSetupWindow {
                                         ui.label(t!("first_time_setup.no_compatible_repo"));
                                         return;
                                     }
-                                    for repo in filtered_repos {
-                                        ui.radio_value(&mut self.current_tl_repo, Some(repo.index.clone()), &repo.name);
-                                        if let Some(short_desc) = &repo.short_desc {
-                                            ui.label(egui::RichText::new(short_desc).small());
+                                    
+                                    let mut last_section: Option<bool> = None;
+                                    
+                                    for repo in filtered_repos.iter() {
+                                        let is_matched = repo.language.as_ref().map_or(false, |l| *l == current_language);
+                                        let is_selected = self.current_tl_repo.as_ref() == Some(&repo.index);
+                                        
+                                        // Add separator before switching from matched to unmatched
+                                        if let Some(prev_matched) = last_section {
+                                            if prev_matched != is_matched {
+                                                ui.separator();
+                                            }
                                         }
+                                        
+                                        // Visual indicator for auto-selected matched language repo
+                                        if is_matched && is_selected {
+                                            let repo_label = format!("★ {}", repo.name);
+                                            ui.radio_value(&mut self.current_tl_repo, Some(repo.index.clone()), repo_label);
+                                            if let Some(short_desc) = &repo.short_desc {
+                                                ui.label(egui::RichText::new(short_desc).small());
+                                            }
+                                        } else {
+                                            ui.radio_value(&mut self.current_tl_repo, Some(repo.index.clone()), &repo.name);
+                                            if let Some(short_desc) = &repo.short_desc {
+                                                ui.label(egui::RichText::new(short_desc).small());
+                                            }
+                                        }
+                                        
+                                        last_section = Some(is_matched);
                                     }
+                                    
                                     ui.radio_value(&mut self.current_tl_repo, None, t!("first_time_setup.skip_translation"));
                                 });
                             });
