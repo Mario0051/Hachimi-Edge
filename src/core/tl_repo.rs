@@ -17,9 +17,24 @@ pub struct RepoInfo {
     pub index: String,
     pub short_desc: Option<String>,
     #[serde(default)]
-    pub language: Option<Language>,
+    pub language: Option<String>,
     #[serde(default)]
     pub region: Region
+}
+
+impl RepoInfo {
+    pub fn is_recommended(&self, current_lang_str: &str) -> bool {
+        let Some(repo_tag) = self.language.as_deref() else { return false };
+        let repo_tag = repo_tag.to_lowercase();
+        let target = current_lang_str.to_lowercase();
+
+        if repo_tag == target || repo_tag.starts_with(&target) {
+            return true;
+        }
+
+        let sys = sys_locale::get_locale().as_deref().unwrap_or("en").to_lowercase();
+        repo_tag.starts_with(&sys) || sys.starts_with(&repo_tag)
+    }
 }
 
 pub fn new_meta_index_request() -> AsyncRequest<Vec<RepoInfo>> {

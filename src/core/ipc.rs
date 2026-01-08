@@ -152,7 +152,7 @@ fn on_http_request(request: &mut Request) -> Result<CommandResponse, Error> {
         },
 
         Command::SoftReset { exec } => {
-            if exec == true {
+            if exec {
                 Thread::main_thread().schedule(|| {
                     GameSystem::SoftwareReset(GameSystem::instance());
                 });
