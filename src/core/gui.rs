@@ -1455,13 +1455,6 @@ impl FirstTimeSetupWindow {
             current_tl_repo: None
         }
     }
-    
-    /// Find and return the index of the first repo that matches current Hachimi language
-    fn find_matched_repo_index(repo_list: &[RepoInfo], current_language: Language) -> Option<String> {
-        repo_list.iter()
-            .find(|repo| repo.language.as_ref().map_or(false, |l| *l == current_language))
-            .map(|repo| repo.index.clone())
-    }
 }
 
 impl Window for FirstTimeSetupWindow {
@@ -1507,27 +1500,19 @@ impl Window for FirstTimeSetupWindow {
 
                         async_request_ui_content(ui, self.index_request.clone(), |ui, repo_list| {
                             let hachimi = Hachimi::instance();
-                            let current_language = hachimi.config.load().language;
-                            
-                            // Auto-select matched repo if not yet selected
-                            if self.current_tl_repo.is_none() {
-                                if let Some(matched_index) = FirstTimeSetupWindow::find_matched_repo_index(repo_list, current_language) {
-                                    self.current_tl_repo = Some(matched_index);
-                                }
-                            }
-                            
+                            let current_lang_str = hachimi.config.load().language.locale_str();
+
                             let mut filtered_repos: Vec<_> = repo_list.iter()
                                 .filter(|repo| repo.region == hachimi.game.region)
                                 .collect();
-                            
-                            // Sort: explicitly-matching language first, then others
-                            filtered_repos.sort_by_key(|repo| {
-                                if repo.language.as_ref().map_or(false, |l| *l == current_language) {
-                                    0
-                                } else {
-                                    1
+
+                            if self.current_tl_repo.is_none() {
+                                if let Some(matched) = filtered_repos.iter().find(|r| r.is_recommended(current_lang_str)) {
+                                    self.current_tl_repo = Some(matched.index.clone());
                                 }
-                            });
+                            }
+  
+                            filtered_repos.sort_by_key(|repo| !repo.is_recommended(current_lang_str));
                             
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 egui::Frame::NONE
@@ -1541,7 +1526,7 @@ impl Window for FirstTimeSetupWindow {
                                     let mut last_section: Option<bool> = None;
                                     
                                     for repo in filtered_repos.iter() {
-                                        let is_matched = repo.language.as_ref().map_or(false, |l| *l == current_language);
+                                        let is_matched = repo.is_recommended(current_lang_str);
                                         let is_selected = self.current_tl_repo.as_ref() == Some(&repo.index);
                                         
                                         // Add separator before switching from matched to unmatched
