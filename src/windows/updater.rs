@@ -1,4 +1,4 @@
-use std::{fs::File, sync::{atomic::{self, AtomicBool}, Arc, Mutex}};
+use std::{fs::File, io::Read, sync::{atomic::{self, AtomicBool}, Arc, Mutex}};
 
 use arc_swap::ArcSwap;
 use rust_i18n::t;
@@ -17,6 +17,8 @@ use crate::core::{gui::{PersistentMessageWindow, SimpleYesNoDialog}, http, Error
 use super::{main::DLL_HMODULE, utils};
 
 const REPO_PATH: &str = "kairusds/Hachimi-Edge";
+const GITHUB_API: &str = "https://api.github.com/repos";
+const CODEBERG_API: &str = "https://codeberg.org/api/v1/repos";
 
 #[derive(Default)]
 pub struct Updater {
@@ -44,18 +46,24 @@ impl Updater {
             mutex.lock().unwrap().show_notification(&t!("notification.checking_for_updates"));
         }
 
-        let latest: Release = http::get_json(&format!("https://api.github.com/repos/{}/releases/latest", REPO_PATH))?;
-        if latest.is_different_version() {
-            let mut installer_asset = None;
-            for asset in latest.assets {
-                if asset.name == "hachimi_installer.exe" {
-                    installer_asset = Some(asset);
-                    break;
-                }
+        let latest = match http::get_json::<Release>(&format!("{}/{}/releases/latest", GITHUB_API, REPO_PATH)) {
+            Ok(res) => res,
+            Err(e) => {
+                warn!("GitHub update check failed, trying Codeberg: {}", e);
+                http::get_json::<Release>(&format!("{}/{}/releases/latest", CODEBERG_API, REPO_PATH))?
             }
+        };
 
-            if installer_asset.is_some() {
-                self.new_update.store(Arc::new(installer_asset));
+        if latest.is_different_version() {
+            let installer_asset = latest.assets.iter().find(|asset| asset.name == "hachimi_installer.exe");
+            let hash_asset = latest.assets.iter().find(|asset| asset.name == "blake3.json");
+
+            if let (Some(installer), Some(h_json)) = (installer_asset, hash_asset) {
+                let hash_data = http::get_json::<Blake3Hashes>(&h_json.browser_download_url)?;
+                let mut asset = installer.clone();
+                asset.expected_hash = Some(hash_data.installer_exe);
+                self.new_update.store(Arc::new(Some(asset)));
+
                 if let Some(mutex) = Gui::instance() {
                     mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
                         &t!("update_prompt_dialog.title"),
@@ -68,8 +76,7 @@ impl Updater {
                 }
                 return Ok(true);
             }
-        }
-        else if let Some(mutex) = Gui::instance() {
+        } else if let Some(mutex) = Gui::instance() {
             mutex.lock().unwrap().show_notification(&t!("notification.no_updates"));
         }
 
@@ -110,6 +117,23 @@ impl Updater {
         let res = ureq::get(&asset.browser_download_url).call()?;
         std::io::copy(&mut res.into_reader(), &mut File::create(&installer_path)?)?;
 
+        // Verify the installer
+        if let Some(expected_hash) = &asset.expected_hash {
+            let mut file = File::open(&installer_path)?;
+            let mut hasher = blake3::Hasher::new();
+            let mut buffer = [0u8; 8192];
+
+            while let Ok(n) = file.read(&mut buffer) {
+                if n == 0 { break; }
+                hasher.update(&buffer[..n]);
+            }
+
+            if hasher.finalize().to_hex().as_str() != expected_hash {
+                let _ = std::fs::remove_file(&installer_path);
+                return Err(Error::FileHashMismatch(installer_path.to_string_lossy().into()));
+            }
+        }
+
         // Launch the installer
         let mut slice = [0u16; MAX_PATH as usize];
         let length = unsafe { GetModuleFileNameW(Some(DLL_HMODULE), &mut slice) } as usize;
@@ -149,9 +173,17 @@ impl Release {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ReleaseAsset {
     // STUB
     name: String,
-    browser_download_url: String
+    browser_download_url: String,
+    #[serde(skip)]
+    pub expected_hash: Option<String>
+}
+
+#[derive(Deserialize)]
+struct Blake3Hashes {
+    #[serde(rename = "hachimi_installer.exe")]
+    installer_exe: String
 }
