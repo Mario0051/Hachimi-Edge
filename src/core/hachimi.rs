@@ -18,6 +18,393 @@ pub const UMAPATCHER_INSTALL_URL: &str = "https://github.com/kairusds/UmaPatcher
 
 pub static CONFIG_LOAD_ERROR: AtomicBool = AtomicBool::new(false);
 
+#[derive(Clone, Debug)]
+struct SurgicalRepair {
+    range: std::ops::Range<usize>,
+    replacement: String,
+}
+
+struct LenientParser<'a> {
+    chars: std::iter::Peekable<std::str::CharIndices<'a>>,
+    input: &'a str,
+    input_len: usize,
+    spans: FnvHashMap<String, std::ops::Range<usize>>,
+    syntax_repairs: Vec<SurgicalRepair>,
+    current_path: Vec<String>,
+}
+
+impl<'a> LenientParser<'a> {
+    fn new(input: &'a str) -> Self {
+        let mut chars = input.char_indices().peekable();
+        if let Some((_, '\u{feff}')) = chars.peek() { chars.next(); }
+        Self {
+            chars,
+            input,
+            input_len: input.len(),
+            spans: FnvHashMap::default(),
+            syntax_repairs: Vec::new(),
+            current_path: Vec::new(),
+        }
+    }
+
+    fn current_pos(&mut self) -> usize {
+        self.chars.peek().map(|(i, _)| *i).unwrap_or(self.input_len)
+    }
+
+    fn consume_ignorable(&mut self) {
+        loop {
+            match self.chars.peek() {
+                Some(&(i, c)) if c.is_whitespace() => {
+                    self.chars.next();
+                },
+                Some(&(start_idx, '/')) => {
+                    let mut lookahead = self.chars.clone();
+                    lookahead.next();
+                    match lookahead.peek() {
+                        Some(&(_, '/')) => {
+                            self.chars.next(); self.chars.next();
+                            while let Some((_, n)) = self.chars.next() {
+                                if n == '\n' || n == '\r' { break; }
+                            }
+                            let end_idx = self.current_pos();
+                            self.syntax_repairs.push(SurgicalRepair {
+                                range: start_idx..end_idx,
+                                replacement: "\n".to_string()
+                            });
+                        },
+                        Some(&(_, '*')) => {
+                            self.chars.next(); self.chars.next();
+                            while let Some((_, n)) = self.chars.next() {
+                                if n == '*' {
+                                    if let Some(&(_, '/')) = self.chars.peek() { self.chars.next(); break; }
+                                }
+                            }
+                            let end_idx = self.current_pos();
+                            self.syntax_repairs.push(SurgicalRepair {
+                                range: start_idx..end_idx,
+                                replacement: " ".to_string()
+                            });
+                        },
+                        _ => break,
+                    }
+                },
+                _ => break,
+            }
+        }
+    }
+
+    fn record_span<F>(&mut self, parse_fn: F) -> serde_json::Value
+    where F: FnOnce(&mut Self) -> serde_json::Value
+    {
+        self.consume_ignorable();
+        let start = self.current_pos();
+        let val = parse_fn(self);
+        let end = self.current_pos();
+
+        if !self.current_path.is_empty() {
+            let key = self.current_path.join(".");
+            self.spans.insert(key, start..end);
+        }
+        val
+    }
+
+    fn consume_root_garbage(&mut self) {
+        loop {
+            self.consume_ignorable();
+            match self.chars.peek() {
+                Some(&(idx, '}')) | Some(&(idx, ']')) => {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: idx..idx+1,
+                        replacement: "".to_string()
+                    });
+                    self.chars.next();
+                },
+                _ => break
+            }
+        }
+    }
+
+    fn parse_root(&mut self) -> serde_json::Value {
+        self.consume_root_garbage();
+
+        if let Some(&(_, '{')) = self.chars.peek() {
+            return self.parse_object();
+        }
+        self.parse_object_body()
+    }
+
+    fn parse_object(&mut self) -> serde_json::Value {
+        self.chars.next();
+        self.parse_object_body()
+    }
+
+    fn parse_object_body(&mut self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        loop {
+            self.consume_ignorable();
+            if let Some(&(_, '}')) = self.chars.peek() { self.chars.next(); break; }
+            if self.chars.peek().is_none() { break; }
+
+            let key = self.parse_key_auto_fix();
+
+            self.consume_ignorable();
+            if let Some(&(_, c)) = self.chars.peek() { if c == ':' || c == '=' { self.chars.next(); } }
+
+            self.current_path.push(key.clone());
+            let val = self.record_span(|p| p.parse_value());
+            self.current_path.pop();
+
+            map.insert(key, val);
+
+            let post_val_pos = self.current_pos();
+            self.consume_ignorable();
+
+            if let Some(&(comma_idx, ',')) = self.chars.peek() {
+                self.chars.next();
+
+                self.consume_ignorable();
+                if let Some(&(_, '}')) = self.chars.peek() {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: comma_idx..comma_idx+1,
+                        replacement: "".to_string()
+                    });
+                    self.chars.next();
+                    break;
+                }
+            } else {
+                if let Some(&(_, '}')) = self.chars.peek() {
+                    self.chars.next();
+                    break;
+                } else {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: post_val_pos..post_val_pos,
+                        replacement: ",".to_string()
+                    });
+                }
+            }
+        }
+        serde_json::Value::Object(map)
+    }
+
+    fn parse_array(&mut self) -> serde_json::Value {
+        let mut vec = Vec::new();
+        self.chars.next();
+        loop {
+            self.consume_ignorable();
+            if let Some(&(_, ']')) = self.chars.peek() { self.chars.next(); break; }
+            if self.chars.peek().is_none() { break; }
+
+            vec.push(self.record_span(|p| p.parse_value()));
+
+            let post_val_pos = self.current_pos();
+            self.consume_ignorable();
+            if let Some(&(comma_idx, ',')) = self.chars.peek() {
+                self.chars.next();
+
+                self.consume_ignorable();
+                if let Some(&(_, ']')) = self.chars.peek() {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: comma_idx..comma_idx+1,
+                        replacement: "".to_string()
+                    });
+                    self.chars.next();
+                    break;
+                }
+            } else {
+                if let Some(&(_, ']')) = self.chars.peek() {
+                    self.chars.next();
+                    break;
+                } else {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: post_val_pos..post_val_pos,
+                        replacement: ",".to_string()
+                    });
+                }
+            }
+        }
+        serde_json::Value::Array(vec)
+    }
+
+    fn parse_key_auto_fix(&mut self) -> String {
+        self.consume_ignorable();
+
+        let start_pos = self.current_pos();
+        if let Some(&(_, c)) = self.chars.peek() {
+            if "\"'“‘".contains(c) {
+                if let serde_json::Value::String(s) = self.parse_string() { return s; }
+            }
+        }
+
+        let mut s = String::new();
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' { s.push(self.chars.next().unwrap().1); } else { break; }
+        }
+        let end_pos = self.current_pos();
+
+        if !s.is_empty() {
+            self.syntax_repairs.push(SurgicalRepair {
+                range: start_pos..end_pos,
+                replacement: format!("\"{}\"", s)
+            });
+        }
+
+        s
+    }
+
+    fn parse_string(&mut self) -> serde_json::Value {
+        let (start_idx, start_char) = self.chars.next().unwrap();
+
+        let is_smart_quote = "“‘".contains(start_char);
+        let end_char = match start_char { '“' => '”', '‘' => '’', c => c };
+
+        let mut s = String::new();
+        while let Some((idx, c)) = self.chars.next() {
+            if c == end_char {
+                if is_smart_quote {
+                    self.syntax_repairs.push(SurgicalRepair { range: start_idx..start_idx+start_char.len_utf8(), replacement: "\"".into() });
+                    self.syntax_repairs.push(SurgicalRepair { range: idx..idx+end_char.len_utf8(), replacement: "\"".into() });
+                }
+                break;
+            }
+            if c == '\\' {
+                if let Some((_, n)) = self.chars.next() {
+                    match n {
+                        'n' => s.push('\n'), 'r' => s.push('\r'), 't' => s.push('\t'),
+                        '"' => s.push('"'), '\\' => s.push('\\'),
+                        'u' => {
+                            let mut hex = String::new();
+                            for _ in 0..4 { if let Some((_, h)) = self.chars.next() { hex.push(h); } }
+                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                if let Some(ch) = std::char::from_u32(code) { s.push(ch); }
+                            }
+                        },
+                        _ => { s.push('\\'); s.push(n); }
+                    }
+                }
+            } else { s.push(c); }
+        }
+        serde_json::Value::String(s)
+    }
+
+    fn parse_value(&mut self) -> serde_json::Value {
+        self.consume_ignorable();
+        match self.chars.peek() {
+            Some(&(_, '{')) => self.parse_object(),
+            Some(&(_, '[')) => self.parse_array(),
+            Some(&(_, '"')) | Some(&(_, '\'')) | Some(&(_, '“')) | Some(&(_, '”')) | Some(&(_, '‘')) | Some(&(_, '’')) => self.parse_string(),
+            Some(&(_, 't')) | Some(&(_, 'T')) => { self.consume_word(); serde_json::Value::Bool(true) },
+            Some(&(_, 'f')) | Some(&(_, 'F')) => { self.consume_word(); serde_json::Value::Bool(false) },
+            Some(&(_, 'n')) | Some(&(_, 'N')) => { self.consume_word(); serde_json::Value::Null },
+            Some(&(_, c)) if c.is_ascii_digit() || c == '-' || c == '.' => self.parse_number(),
+            Some(_) => { self.chars.next(); self.parse_value() },
+            None => serde_json::Value::Null
+        }
+    }
+
+    fn consume_word(&mut self) { while let Some(&(_, c)) = self.chars.peek() { if c.is_alphabetic() { self.chars.next(); } else { break; } } }
+
+    fn parse_number(&mut self) -> serde_json::Value {
+        let mut s = String::new();
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E' { s.push(self.chars.next().unwrap().1); } else { break; }
+        }
+        if let Ok(n) = s.parse::<i64>() { serde_json::json!(n) } else if let Ok(n) = s.parse::<f64>() { serde_json::json!(n) } else { serde_json::Value::Null }
+    }
+}
+
+fn load_and_repair_json<T>(path: &Path) -> Result<T, Error>
+where T: DeserializeOwned + Serialize + Default + Clone
+{
+    if fs::metadata(path).is_err() {
+        return Ok(T::default());
+    }
+
+    let json_content = fs::read_to_string(path)?;
+    let mut parser = LenientParser::new(&json_content);
+    let raw_json_val = parser.parse_root();
+
+    let default_config = T::default();
+    let mut final_config_val = serde_json::to_value(&default_config).map_err(Error::JsonParseError)?;
+    let default_root = final_config_val.clone();
+
+    let mut repairs: Vec<SurgicalRepair> = parser.syntax_repairs;
+
+    if let Some(user_map) = raw_json_val.as_object() {
+        if let Some(final_map) = final_config_val.as_object_mut() {
+            for (k, v) in user_map {
+                let backup = final_map.get(k).cloned();
+                final_map.insert(k.clone(), v.clone());
+
+                if serde_json::from_value::<T>(serde_json::Value::Object(final_map.clone())).is_err() {
+                    warn!("Invalid config field '{}' detected.", k);
+
+                    let mut merged_val = default_root.get(k).cloned().unwrap_or(serde_json::Value::Null);
+                    let mut repair_target_path = k.clone();
+                    let mut replacement_val = merged_val.clone();
+
+                    if v.is_object() && merged_val.is_object() {
+                        let user_obj = v.as_object().unwrap();
+                         for (sub_k, sub_v) in user_obj {
+                             let sub_backup = {
+                                 let merged_obj = merged_val.as_object_mut().unwrap();
+                                 let backup = merged_obj.get(sub_k).cloned();
+                                 merged_obj.insert(sub_k.clone(), sub_v.clone());
+                                 backup
+                             };
+
+                             final_map.insert(k.clone(), merged_val.clone());
+                             if serde_json::from_value::<T>(serde_json::Value::Object(final_map.clone())).is_err() {
+                                 warn!("Identified culprit: '{}.{}'. Reverting to default.", k, sub_k);
+                                 let merged_obj = merged_val.as_object_mut().unwrap();
+                                 if let Some(old) = sub_backup {
+                                     merged_obj.insert(sub_k.clone(), old.clone());
+                                     replacement_val = old;
+                                 } else {
+                                     merged_obj.remove(sub_k);
+                                 }
+                                 repair_target_path = format!("{}.{}", k, sub_k);
+                             }
+                         }
+                    } else {
+                        merged_val = default_root.get(k).cloned().unwrap_or(serde_json::Value::Null);
+                        replacement_val = merged_val.clone();
+                    }
+
+                    final_map.insert(k.clone(), merged_val);
+
+                    if let Some(span) = parser.spans.get(&repair_target_path) {
+                         let replacement_str = serde_json::to_string(&replacement_val).unwrap_or_default();
+
+                         repairs.retain(|r| {
+                             let is_inside = r.range.start >= span.start && r.range.end <= span.end;
+                             !is_inside
+                         });
+
+                         repairs.push(SurgicalRepair { range: span.clone(), replacement: replacement_str });
+                    }
+                }
+            }
+        }
+    }
+
+    let final_config: T = serde_json::from_value(final_config_val).map_err(Error::JsonParseError)?;
+
+    if !repairs.is_empty() {
+        info!("Applying {} surgical repairs to config file...", repairs.len());
+        repairs.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+
+        let mut fixed_content = json_content.clone();
+        for repair in repairs {
+            if repair.range.end <= fixed_content.len() {
+                fixed_content.replace_range(repair.range, &repair.replacement);
+            }
+        }
+        let _ = fs::write(path, fixed_content);
+    }
+
+    Ok(final_config)
+}
+
 pub struct Hachimi {
     // Hooking stuff
     pub interceptor: Interceptor,
@@ -140,21 +527,16 @@ impl Hachimi {
         })
     }
 
-    // region param is unused?
     fn load_config(data_dir: &Path, _region: &Region) -> Result<Config, Error> {
         let config_path = data_dir.join("config.json");
-        if fs::metadata(&config_path).is_ok() {
-            let json = fs::read_to_string(&config_path)?;
-            match serde_json::from_str::<Config>(&json) {
-                Ok(config) => Ok(config),
-                Err(e) => {
-                    eprintln!("Failed to parse config: {}", e);
-                    CONFIG_LOAD_ERROR.store(true, std::sync::atomic::Ordering::Release);
-                    Ok(Config::default())
-                }
+
+        match load_and_repair_json(&config_path) {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                eprintln!("Failed to parse config: {}", e);
+                CONFIG_LOAD_ERROR.store(true, std::sync::atomic::Ordering::Release);
+                Ok(Config::default())
             }
-        }else {
-            Ok(Config::default())
         }
     }
 
@@ -416,7 +798,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Deserialize, Default, Clone)]
+#[derive(Deserialize, Serialize, Default, Clone)]
 pub struct OsOption<T> {
     #[cfg(target_os = "android")]
     android: Option<T>,
@@ -554,8 +936,7 @@ impl LocalizedData {
             path = Some(ld_path);
 
             if fs::metadata(&ld_config_path).is_ok() {
-                let json = fs::read_to_string(&ld_config_path)?;
-                serde_json::from_str(&json)?
+                load_and_repair_json(&ld_config_path)?
             }
             else {
                 warn!("Localized data config not found");
@@ -680,7 +1061,7 @@ impl LocalizedData {
     }
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct LocalizedDataConfig {
     pub localize_dict: Option<String>,
     pub hashed_dict: Option<String>,
@@ -734,7 +1115,7 @@ pub struct LocalizedDataConfig {
     pub _debug: i32
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct UITextConfig {
     pub text: Option<String>,
     pub font_size: Option<i32>,
@@ -798,7 +1179,7 @@ pub struct AssetMetadata {
     pub bundle_name: Option<String>
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct PenaltiesConfig {
     nline_penalty: usize,
     overflow_penalty: usize,
@@ -807,7 +1188,7 @@ pub struct PenaltiesConfig {
     hyphen_penalty: usize
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct SkillFormatting {
     #[serde(default = "SkillFormatting::default_length")]
     pub name_length: i32,
