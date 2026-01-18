@@ -124,13 +124,33 @@ impl<'a> LenientParser<'a> {
         }
     }
 
+    fn consume_trailing_garbage(&mut self) {
+        self.consume_ignorable();
+
+        if self.chars.peek().is_some() {
+            let start = self.current_pos();
+            while self.chars.next().is_some() {}
+            let end = self.current_pos();
+
+            self.syntax_repairs.push(SurgicalRepair {
+                range: start..end,
+                replacement: "".to_string()
+            });
+        }
+    }
+
     fn parse_root(&mut self) -> serde_json::Value {
         self.consume_root_garbage();
 
-        if let Some(&(_, '{')) = self.chars.peek() {
-            return self.parse_object();
-        }
-        self.parse_object_body()
+        let val = if let Some(&(_, '{')) = self.chars.peek() {
+            self.parse_object()
+        } else {
+            self.parse_object_body()
+        };
+
+        self.consume_trailing_garbage();
+
+        val
     }
 
     fn parse_object(&mut self) -> serde_json::Value {
