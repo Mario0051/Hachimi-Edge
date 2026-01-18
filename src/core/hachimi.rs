@@ -287,6 +287,25 @@ impl<'a> LenientParser<'a> {
                 break;
             }
             if c == '\\' {
+                let mut is_escaped_quote = false;
+                if let Some((_, next_char)) = self.chars.peek() {
+                    if *next_char == '"' || *next_char == '\'' {
+                        let mut lookahead = self.chars.clone();
+                        lookahead.next();
+                        if let Some((_, next_next)) = lookahead.peek() {
+                            if next_next.is_whitespace() || ",}]".contains(*next_next) {
+                                self.syntax_repairs.push(SurgicalRepair {
+                                    range: idx..idx + 1,
+                                    replacement: "\\\\".to_string(),
+                                });
+                                s.push('\\');
+                                continue;
+                            }
+                        }
+                        is_escaped_quote = true;
+                    }
+                }
+
                 if let Some((_, n)) = self.chars.next() {
                     match n {
                         'n' => s.push('\n'), 'r' => s.push('\r'), 't' => s.push('\t'),
@@ -298,12 +317,46 @@ impl<'a> LenientParser<'a> {
                                 if let Some(ch) = std::char::from_u32(code) { s.push(ch); }
                             }
                         },
-                        _ => { s.push('\\'); s.push(n); }
+                        _ => {
+                            s.push('\\');
+                            s.push(n);
+                        }
                     }
                 }
             } else { s.push(c); }
         }
         serde_json::Value::String(s)
+    }
+
+    fn parse_unquoted_value(&mut self) -> serde_json::Value {
+        self.consume_ignorable();
+        let start_pos = self.current_pos();
+
+        let mut s = String::new();
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                s.push(self.chars.next().unwrap().1);
+            } else {
+                break;
+            }
+        }
+        let end_pos = self.current_pos();
+
+        match s.to_lowercase().as_str() {
+            "true" => serde_json::Value::Bool(true),
+            "false" => serde_json::Value::Bool(false),
+            "null" => serde_json::Value::Null,
+
+            _ => {
+                if !s.is_empty() {
+                    self.syntax_repairs.push(SurgicalRepair {
+                        range: start_pos..end_pos,
+                        replacement: format!("\"{}\"", s)
+                    });
+                }
+                serde_json::Value::String(s)
+            }
+        }
     }
 
     fn parse_value(&mut self) -> serde_json::Value {
@@ -312,10 +365,13 @@ impl<'a> LenientParser<'a> {
             Some(&(_, '{')) => self.parse_object(),
             Some(&(_, '[')) => self.parse_array(),
             Some(&(_, '"')) | Some(&(_, '\'')) | Some(&(_, '“')) | Some(&(_, '”')) | Some(&(_, '‘')) | Some(&(_, '’')) => self.parse_string(),
-            Some(&(_, 't')) | Some(&(_, 'T')) => { self.consume_word(); serde_json::Value::Bool(true) },
-            Some(&(_, 'f')) | Some(&(_, 'F')) => { self.consume_word(); serde_json::Value::Bool(false) },
-            Some(&(_, 'n')) | Some(&(_, 'N')) => { self.consume_word(); serde_json::Value::Null },
-            Some(&(_, c)) if c.is_ascii_digit() || c == '-' || c == '.' => self.parse_number(),
+
+            Some(&(_, c)) if c == '-' || c == '.' || c.is_ascii_digit() => self.parse_number(),
+
+            Some(&(_, ',')) | Some(&(_, '}')) | Some(&(_, ']')) => serde_json::Value::Null,
+
+            Some(&(_, c)) if c.is_alphabetic() || c == '_' => self.parse_unquoted_value(),
+
             Some(_) => { self.chars.next(); self.parse_value() },
             None => serde_json::Value::Null
         }
@@ -324,6 +380,25 @@ impl<'a> LenientParser<'a> {
     fn consume_word(&mut self) { while let Some(&(_, c)) = self.chars.peek() { if c.is_alphabetic() { self.chars.next(); } else { break; } } }
 
     fn parse_number(&mut self) -> serde_json::Value {
+        if let Some(&(_, '0')) = self.chars.peek() {
+            let mut lookahead = self.chars.clone();
+            lookahead.next();
+            if let Some(&(_, x)) = lookahead.peek() {
+                if x == 'x' || x == 'X' {
+                    self.chars.next();
+                    self.chars.next();
+                    let mut s = String::new();
+                    while let Some(&(_, c)) = self.chars.peek() {
+                        if c.is_ascii_hexdigit() { s.push(self.chars.next().unwrap().1); } else { break; }
+                    }
+                    if let Ok(n) = i64::from_str_radix(&s, 16) {
+                        return serde_json::json!(n);
+                    }
+                    return serde_json::Value::Null;
+                }
+            }
+        }
+
         let mut s = String::new();
         while let Some(&(_, c)) = self.chars.peek() {
             if c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E' { s.push(self.chars.next().unwrap().1); } else { break; }
