@@ -209,3 +209,19 @@ jobs:
             artifacts/android/*
             artifacts/windows/*
           tag_name: ${{ env.RELEASE_VERSION }}
+
+      - name: Generate GitHub App Token
+        id: get_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: UMPD-Patcher
+
+      - name: Trigger UMPD-Patcher Workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ steps.get_token.outputs.token }}
+          repository: ${{ github.repository_owner }}/UMPD-Patcher
+          event-type: build-patch
