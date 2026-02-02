@@ -34,6 +34,7 @@ jobs:
           RELEASE=1 ./tools/android/build.sh
         env:
           HACHIMI_IGNORE_DIRTY: "true"
+          ANDROID_UPDATE_REPO: ${{ github.repository_owner }}/UMPD-Patcher
 
       - name: Upload Android binaries
         uses: actions/upload-artifact@v4
