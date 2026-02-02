@@ -1,5 +1,5 @@
 use jni::{
-    objects::{JValue, JMap, JObject, JString},
+    objects::{JValue, JMap, JObject, JString, GlobalRef},
     JNIEnv
 };
 use crate::{
@@ -204,6 +204,22 @@ pub fn get_activity(mut env: JNIEnv<'_>) -> Option<JObject<'_>> {
         .l()
         .ok()?;
     Some(activity)
+}
+
+pub fn get_unity_context(env: &mut JNIEnv) -> Option<GlobalRef> {
+    let unity_player_class = env.find_class("com/unity3d/player/UnityPlayer").ok()?;
+
+    let activity_obj = env
+        .get_static_field(
+            unity_player_class,
+            "currentActivity",
+            "Landroid/app/Activity;",
+        )
+        .ok()?
+        .l()
+        .ok()?;
+
+    env.new_global_ref(activity_obj).ok()
 }
 
 pub fn get_device_api_level(env: *mut jni::sys::JNIEnv) -> i32 {
