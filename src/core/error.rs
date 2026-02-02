@@ -18,7 +18,8 @@ pub enum Error {
     FileHashMismatch(String),
     ZipError(zip::result::ZipError),
     DiscordRpcError(String),
-    RuntimeError(String)
+    RuntimeError(String),
+    Msg(String),
 }
 
 impl fmt::Display for Error {
@@ -68,6 +69,9 @@ impl fmt::Display for Error {
             },
             Error::RuntimeError(msg) => {
                 write!(f, "{}", msg)
+            },
+            Error::Msg(s) => {
+                write!(f, "{}", s)
             }
         }
     }
@@ -101,5 +105,17 @@ impl From<zip::result::ZipError> for Error {
 impl From<WindowsError> for Error {
     fn from(e: WindowsError) -> Self {
         Error::RuntimeError(e.to_string())
+    }
+}
+
+impl From<String> for Error {
+    fn from(s: String) -> Self {
+        Error::Msg(s)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(s: &str) -> Self {
+        Error::Msg(s.to_string())
     }
 }

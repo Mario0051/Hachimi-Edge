@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}};
+use std::{sync::{Arc, Mutex}, collections::HashMap};
 
 use rust_i18n::t;
 use serde::Deserialize;
@@ -6,9 +6,9 @@ use serde::Deserialize;
 use crate::core::{gui::SimpleYesNoDialog, hachimi::{REPO_PATH, CODEBERG_API, GITHUB_API}, http, Error, Gui, Hachimi};
 
 #[cfg(target_os = "android")]
-use jni::{JavaVM, objects::{GlobalRef, JValue, JObject}};
+use jni::{JavaVM, objects::{GlobalRef, JValue, JObject, JClass}};
 #[cfg(target_os = "android")]
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct Updater {
@@ -43,11 +43,16 @@ impl Updater {
             mutex.lock().unwrap().show_notification(&t!("notification.checking_for_updates"));
         }
 
-        let latest = match http::get_json::<Release>(&format!("{}/{}/releases/latest", GITHUB_API, REPO_PATH)) {
+        #[cfg(not(target_os = "android"))]
+        let repo_path = REPO_PATH;
+        #[cfg(target_os = "android")]
+        let repo_path = env!("ANDROID_UPDATE_REPO");
+
+        let latest = match http::get_json::<Release>(&format!("{}/{}/releases/latest", GITHUB_API, repo_path)) {
             Ok(res) => res,
             Err(e) => {
                 warn!("GitHub update check failed, trying Codeberg: {}", e);
-                http::get_json::<Release>(&format!("{}/{}/releases/latest", CODEBERG_API, REPO_PATH))?
+                http::get_json::<Release>(&format!("{}/{}/releases/latest", CODEBERG_API, repo_path))?
             }
         };
 
@@ -81,11 +86,16 @@ impl Updater {
                 let apk_asset = latest.assets.iter().find(|asset| asset.name == "umamusume.apk");
                 let hash_asset = latest.assets.iter().find(|asset| asset.name == "blake3.json");
 
-                if let (Some(apk), Some(h_json)) = (apk_asset, hash_asset) {
-                     let hash_data = http::get_json::<HashMap<String, String>>(&h_json.browser_download_url)?;
-                     let remote_hash = hash_data.get("umamusume.apk");
+                if let Some(apk) = apk_asset {
+                     let mut remote_hash = None;
 
-                     if let Some(remote) = remote_hash {
+                     if let Some(h_json) = hash_asset {
+                        if let Ok(hash_data) = http::get_json::<HashMap<String, String>>(&h_json.browser_download_url) {
+                            remote_hash = hash_data.get("umamusume.apk").cloned();
+                        }
+                     }
+
+                     if let Some(ref remote) = remote_hash {
                         if let Some(local) = self.get_current_apk_hash() {
                             if remote == &local {
                                 return Ok(false);
@@ -94,7 +104,7 @@ impl Updater {
                      }
 
                      let mut asset = apk.clone();
-                     asset.expected_hash = remote_hash.cloned();
+                     asset.expected_hash = remote_hash;
                      self.new_update.store(Arc::new(Some(asset)));
 
                      if let Some(mutex) = Gui::instance() {
@@ -121,11 +131,12 @@ impl Updater {
     fn get_current_apk_hash(&self) -> Option<String> {
         let guard = self.android_context.lock().unwrap();
         let (vm, context) = guard.as_ref()?;
-        let mut env = vm.attach_current_thread().ok()?;
-        let context_obj = context.as_obj();
+
+        let mut env: jni::AttachGuard = vm.attach_current_thread().ok()?;
+
+        let context_obj: &JObject = context.as_obj();
 
         let package_name = env.call_method(context_obj, "getPackageName", "()Ljava/lang/String;", &[]).ok()?.l().ok()?;
-
         let package_manager = env.call_method(context_obj, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]).ok()?.l().ok()?;
 
         let package_info = env.call_method(
@@ -136,7 +147,6 @@ impl Updater {
         ).ok()?.l().ok()?;
 
         let app_info = env.get_field(&package_info, "applicationInfo", "Landroid/content/pm/ApplicationInfo;").ok()?.l().ok()?;
-
         let source_dir_jstr = env.get_field(&app_info, "sourceDir", "Ljava/lang/String;").ok()?.l().ok()?;
         let source_dir: String = env.get_string(&source_dir_jstr.into()).ok()?.into();
 
@@ -213,7 +223,7 @@ impl Updater {
 
                 if hasher.finalize().to_hex().as_str() != expected_hash {
                     let _ = std::fs::remove_file(&installer_path);
-                    return Err(Error::FileHashMismatch(installer_path.to_string_lossy().into()));
+                    return Err(Error::Msg(format!("Hash mismatch for {}", installer_path.to_string_lossy())));
                 }
             }
 
@@ -246,8 +256,8 @@ impl Updater {
 
             let guard = self.android_context.lock().unwrap();
             let (vm, context) = guard.as_ref().ok_or(Error::Msg("JNI Context not initialized".into()))?;
-            let mut env = vm.attach_current_thread().map_err(|_| Error::Msg("Failed to attach thread".into()))?;
-            let context_obj = context.as_obj();
+            let mut env: jni::AttachGuard = vm.attach_current_thread().map_err(|_| Error::Msg("Failed to attach thread".into()))?;
+            let context_obj: &JObject = context.as_obj();
 
             let cache_dir_obj = env.call_method(context_obj, "getCacheDir", "()Ljava/io/File;", &[]).unwrap().l().unwrap();
             let cache_dir_path_jstr = env.call_method(cache_dir_obj, "getAbsolutePath", "()Ljava/lang/String;", &[]).unwrap().l().unwrap();
@@ -256,18 +266,15 @@ impl Updater {
             let apk_path = PathBuf::from(cache_dir_path).join("umamusume-update.apk");
 
             let res = ureq::get(&asset.browser_download_url).call()?;
-            let total_size = res.header("Content-Length").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
 
             let mut reader = res.into_body().into_reader();
             let mut out = std::io::BufWriter::new(File::create(&apk_path)?);
             let mut buffer = [0; 8192];
-            let mut _downloaded: u64 = 0;
 
             loop {
                 let len = reader.read(&mut buffer)?;
                 if len == 0 { break; }
                 out.write_all(&buffer[..len])?;
-                _downloaded += len as u64;
             }
             drop(out);
 
@@ -283,7 +290,7 @@ impl Updater {
                 }
                 if hasher.finalize().to_hex().as_str() != expected_hash {
                      let _ = std::fs::remove_file(&apk_path);
-                    return Err(Error::FileHashMismatch(apk_path.to_string_lossy().into()));
+                     return Err(Error::Msg(format!("Hash mismatch for {}", apk_path.to_string_lossy())));
                 }
             }
 
@@ -296,13 +303,22 @@ impl Updater {
 
             let context_class = env.get_object_class(context_obj).unwrap();
             let class_loader = env.call_method(context_class, "getClassLoader", "()Ljava/lang/ClassLoader;", &[]).unwrap().l().unwrap();
+
             let file_provider_class_name = env.new_string("androidx.core.content.FileProvider").unwrap();
-            let file_provider_class = env.call_method(class_loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&file_provider_class_name.into())]).unwrap().l().unwrap();
+
+            let file_provider_class_obj = env.call_method(
+                class_loader, 
+                "loadClass", 
+                "(Ljava/lang/String;)Ljava/lang/Class;", 
+                &[JValue::Object(&file_provider_class_name.into())]
+            ).unwrap().l().unwrap();
+
+            let file_provider_class: JClass = file_provider_class_obj.into();
 
             let uri_obj = env.call_static_method(
-                file_provider_class.into(),
-                "getUriForFile",
-                "(Landroid/content/Context;Ljava/lang/String;Ljava/io/File;)Landroid/net/Uri;",
+                &file_provider_class,
+                "getUriForFile", 
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/io/File;)Landroid/net/Uri;", 
                 &[JValue::Object(context_obj), JValue::Object(&authority.into()), JValue::Object(&file_obj)]
             ).unwrap().l().unwrap();
 
