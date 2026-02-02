@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 
 use crate::core::Hachimi;
 
-use super::{hook, plugin_loader};
+use super::{hook, plugin_loader, utils};
 
 #[allow(non_camel_case_types)]
 type JniOnLoadFn = extern "C" fn(vm: JavaVM, reserved: *mut c_void) -> jint;
@@ -35,7 +35,16 @@ pub extern "C" fn JNI_OnLoad(vm: JavaVM, reserved: *mut c_void) -> jint {
     let _ = JAVA_VM.set(vm);
     let hachimi = Hachimi::instance();
     *hachimi.plugins.lock().unwrap() = plugin_loader::load_libraries();
-    let env = vm_for_env.get_env().unwrap();
+
+    let mut env = vm_for_env.get_env().unwrap();
+
+    if let Some(context_ref) = utils::get_unity_context(&mut env) {
+        let vm_for_updater = unsafe { JavaVM::from_raw(vm_ptr).unwrap() };
+        hachimi.updater.init_android(vm_for_updater, context_ref);
+
+        hachimi.updater.clone().check_for_updates(|_| {});
+    }
+
     hook::init(env.get_raw());
 
     info!("JNI_OnLoad");
