@@ -257,6 +257,8 @@ impl Hachimi {
 
         hachimi_impl::on_hooking_finished(self);
 
+        Hachimi::instance().start_bg_update_thread();
+
         for plugin in self.plugins.lock().unwrap().iter() {
             info!("Initializing plugin: {}", plugin.name);
             let res = plugin.init();
@@ -277,10 +279,37 @@ impl Hachimi {
             self.updater.clone().check_for_updates(|new_update| {
                 let hachimi = Hachimi::instance();
                 if !new_update && !hachimi.config.load().translator_mode {
-                    hachimi.tl_updater.clone().check_for_updates(false);
+                    hachimi.tl_updater.clone().check_for_updates(false, false);
                 }
             });
         }
+    }
+
+    pub fn start_bg_update_thread(self: Arc<Self>) {
+        std::thread::Builder::new()
+            .name("bg_update_thread".into())
+            .spawn(move || {
+                let mut elapsed: u64 = 0;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+
+                    let config = self.config.load();
+                    if config.bg_update_mode == BgUpdateMode::Disabled || config.bg_update_interval_sec == 0 || config.translator_mode {
+                        elapsed = 0;
+                        continue;
+                    }
+
+                    elapsed += 5;
+
+                    if elapsed >= config.bg_update_interval_sec {
+                        elapsed = 0;
+                        let silent = config.bg_update_mode == BgUpdateMode::Silent;
+                        info!("Running background translation update check (Silent: {})...", silent);
+                        self.tl_updater.clone().check_for_updates(false, silent);
+                    }
+                }
+            })
+            .expect("Failed to spawn background update thread");
     }
 }
 
@@ -288,6 +317,16 @@ fn default_serde_instance<'a, T: Deserialize<'a>>() -> Option<T> {
     let empty_data = std::iter::empty::<((), ())>();
     let empty_deserializer = serde::de::value::MapDeserializer::<_, serde::de::value::Error>::new(empty_data);
     T::deserialize(empty_deserializer).ok()
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum BgUpdateMode {
+    Disabled,
+    Periodic,
+    Silent
+}
+impl Default for BgUpdateMode {
+    fn default() -> Self { Self::Disabled }
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -315,6 +354,12 @@ pub struct Config {
     pub lazy_translation_updates: bool,
     #[serde(default)]
     pub disable_auto_update_check: bool,
+
+    #[serde(default)]
+    pub bg_update_mode: BgUpdateMode,
+    #[serde(default = "Config::default_bg_update_interval_sec")]
+    pub bg_update_interval_sec: u64,
+
     #[serde(default)]
     pub disable_translations: bool,
     #[serde(default = "Config::default_gui_scale")]
@@ -410,6 +455,7 @@ impl Config {
     pub fn default_extreme_bg() -> egui::Color32 { egui::Color32::from_rgb(15, 15, 15) }
     pub fn default_text_color() -> egui::Color32 { egui::Color32::from_gray(170) }
     pub fn default_window_rounding() -> f32 { 10.0 }
+    fn default_bg_update_interval_sec() -> u64 { 3600 }
 }
 
 impl Default for Config {
