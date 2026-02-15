@@ -5,7 +5,7 @@ use egui::Align;
 
 use crate::{core::{gui, Hachimi, Interceptor}, il2cpp::{self, types::{il2cpp_array_size_t, FieldInfo, Il2CppArray, Il2CppClass, Il2CppImage, Il2CppObject, Il2CppThread, Il2CppTypeEnum, MethodInfo}}};
 
-const VERSION: i32 = 2;
+const VERSION: i32 = 3;
 
 static PLUGIN_VTABLE: OnceCell<Vtable> = OnceCell::new();
 
@@ -455,7 +455,6 @@ unsafe extern "C" fn gui_register_menu_section_with_icon(
     )
 }
 
-
 #[cfg(target_os = "android")]
 unsafe extern "C" fn android_dex_load(dex_ptr: *const u8, dex_len: usize, class_name: *const c_char) -> u64 {
     crate::android::dex_bridge::dex_load(dex_ptr, dex_len, class_name)
@@ -499,6 +498,43 @@ unsafe extern "C" fn android_dex_call_static_string(handle: u64, method: *const 
 #[cfg(not(target_os = "android"))]
 unsafe extern "C" fn android_dex_call_static_string(_handle: u64, _method: *const c_char, _sig: *const c_char, _arg: *const c_char) -> bool {
     false
+}
+
+unsafe extern "C" fn gui_ui_searchable_combobox(
+    ui: *mut c_void,
+    id_salt: *const c_char,
+    selected_value: *mut i32,
+    item_values: *const i32,
+    item_labels: *const *const c_char,
+    item_count: usize
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if selected_value.is_null() || (item_count > 0 && (item_values.is_null() || item_labels.is_null())) { return false; }
+
+    let id_salt_str = cstr_or_empty(id_salt);
+    let values = if item_count > 0 { std::slice::from_raw_parts(item_values, item_count) } else { &[] };
+    let labels = if item_count > 0 { std::slice::from_raw_parts(item_labels, item_count) } else { &[] };
+
+    let mut current_val = *selected_value;
+    let mut choices = Vec::with_capacity(item_count);
+
+    for i in 0..item_count {
+        choices.push((values[i], cstr_or_empty(labels[i])));
+    }
+
+    let popup_id = ui.make_persistent_id(id_salt_str).with("popup");
+
+    let mut search_term = ui.data_mut(|d| d.get_temp::<String>(popup_id).unwrap_or_default());
+
+    let changed = crate::core::gui::Gui::run_combo_menu(ui, id_salt_str, &mut current_val, &choices, &mut search_term);
+
+    ui.data_mut(|d| d.insert_temp(popup_id, search_term));
+
+    if changed {
+        *selected_value = current_val;
+    }
+
+    changed
 }
 
 #[repr(C)]
@@ -634,6 +670,10 @@ pub struct Vtable {
     pub android_dex_unload: unsafe extern "C" fn(handle: u64) -> bool,
     pub android_dex_call_static_noargs: unsafe extern "C" fn(handle: u64, method: *const c_char, sig: *const c_char) -> bool,
     pub android_dex_call_static_string: unsafe extern "C" fn(handle: u64, method: *const c_char, sig: *const c_char, arg: *const c_char) -> bool,
+
+    pub gui_ui_searchable_combobox: unsafe extern "C" fn(
+        ui: *mut c_void, id_salt: *const c_char, selected_value: *mut i32, item_values: *const i32, item_labels: *const *const c_char, item_count: usize
+    ) -> bool,
 }
 
 impl Vtable {
@@ -687,6 +727,7 @@ impl Vtable {
         android_dex_unload,
         android_dex_call_static_noargs,
         android_dex_call_static_string,
+        gui_ui_searchable_combobox,
     };
 
     pub fn instantiate() -> Self {
