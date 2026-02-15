@@ -102,7 +102,8 @@ struct UpdateInfo {
     #[allow(dead_code)]
     total_size: usize,       // Total size of all files (for ZIP downloads)
     will_use_zip: bool,      // Whether ZIP download will be used
-    modifies_atlas: bool     // Whether file updates include atlases
+    modifies_atlas: bool,     // Whether file updates include atlases
+    index_etag: Option<String>,
 }
 
 #[derive(Default, Clone)]
@@ -124,6 +125,8 @@ const REPO_CACHE_FILENAME: &str = ".tl_repo_cache";
 #[derive(Serialize, Deserialize, Default)]
 struct RepoCache {
     base_url: String,
+    #[serde(default)]
+    index_etag: Option<String>,
     files: FnvHashMap<String, String> // path: hash
 }
 const REPO_EXCLUDES_FILENAME: &str = "excludes.txt";
@@ -132,7 +135,8 @@ const REPO_EXCLUDES_FILENAME: &str = "excludes.txt";
 pub struct Updater {
     update_check_mutex: Mutex<()>,
     new_update: ArcSwap<Option<UpdateInfo>>,
-    progress: ArcSwap<Option<UpdateProgress>>
+    progress: ArcSwap<Option<UpdateProgress>>,
+    skipped_etag: Mutex<Option<String>>
 }
 
 const LOCALIZED_DATA_DIR: &str = "localized_data";
@@ -166,11 +170,17 @@ impl DownloadJob {
 }
 
 impl Updater {
-    pub fn check_for_updates(self: Arc<Self>, pedantic: bool) {
+    pub fn skip_update(&self, etag: Option<String>) {
+        *self.skipped_etag.lock().unwrap() = etag;
+    }
+
+    pub fn check_for_updates(self: Arc<Self>, pedantic: bool, silent: bool) {
         std::thread::spawn(move || {
-            if let Err(e) = self.check_for_updates_internal(pedantic) {
+            if let Err(e) = self.check_for_updates_internal(pedantic, silent) {
                 if let Some(mutex) = Gui::instance() {
-                    mutex.lock().unwrap().show_notification(&format!("{}", e));
+                    if !silent {
+                        mutex.lock().unwrap().show_notification(&format!("{}", e));
+                    }
                 }
                 info!("{}", e);
             }
@@ -207,7 +217,7 @@ impl Updater {
         true
     }
 
-    fn check_for_updates_internal(&self, pedantic: bool) -> Result<(), Error> {
+    fn check_for_updates_internal(&self, pedantic: bool, silent: bool) -> Result<(), Error> {
         // Prevent multiple update checks running at the same time
         let Ok(_guard) = self.update_check_mutex.try_lock() else {
             return Ok(());
@@ -220,20 +230,51 @@ impl Updater {
         };
         let ld_dir_path = config.localized_data_dir.as_ref().map(|p| hachimi.get_data_path(p));
 
-        if let Some(mutex) = Gui::instance() {
-            mutex.lock().unwrap().show_notification(&t!("notification.checking_for_tl_updates"));
+        if !silent {
+            if let Some(mutex) = Gui::instance() {
+                mutex.lock().unwrap().show_notification(&t!("notification.checking_for_tl_updates"));
+            }
         }
-
-        let index: RepoIndex = http::get_json(index_url)?;
 
         let cache_path = hachimi.get_data_path(REPO_CACHE_FILENAME);
         let repo_cache = if fs::metadata(&cache_path).is_ok() {
             let json = fs::read_to_string(&cache_path)?;
-            serde_json::from_str(&json)?
+            serde_json::from_str(&json).unwrap_or_default()
         }
         else {
             RepoCache::default()
         };
+
+        let mut new_etag: Option<String> = None;
+        if let Ok(head_res) = ureq::agent().head(index_url).call() {
+            if let Some(etag_val) = head_res.headers().get("ETag") {
+                if let Ok(etag_str) = etag_val.to_str() {
+                    let etag_string = etag_str.to_string();
+
+                    if let Some(skipped) = &*self.skipped_etag.lock().unwrap() {
+                        if !pedantic && skipped == &etag_string {
+                            debug!("Server ETag matches the skipped ETag. Ignoring update.");
+                            return Ok(());
+                        }
+                    }
+
+                    if let Some(cached_etag) = &repo_cache.index_etag {
+                        if !pedantic && cached_etag == &etag_string {
+                            debug!("Server ETag matches cached ETag. No translation updates available.");
+                            if !silent {
+                                if let Some(mutex) = Gui::instance() {
+                                    mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+                                }
+                            }
+                            return Ok(());
+                        }
+                    }
+                    new_etag = Some(etag_string);
+                }
+            }
+        }
+
+        let index: RepoIndex = http::get_json(index_url)?;
 
         let excludes_path = hachimi.get_data_path(REPO_EXCLUDES_FILENAME);
         let excludes: HashSet<String> = if excludes_path.exists() {
@@ -329,10 +370,13 @@ impl Updater {
                 update_size,
                 total_size,
                 will_use_zip,
-                modifies_atlas
+                modifies_atlas,
+                index_etag: new_etag.clone(),
             })));
 
-            if let Some(mutex) = Gui::instance() {
+            if silent {
+                Hachimi::instance().tl_updater.clone().run();
+            } else if let Some(mutex) = Gui::instance() {
                 // Determine the dialog message based on download strategy
                 let dialog_message = if will_use_zip && update_size > 0 {
                     let size_ratio = total_size as f64 / update_size.max(1) as f64;
@@ -360,18 +404,34 @@ impl Updater {
                     t!("tl_update_dialog.content", size = Size::from_bytes(actual_download_size))
                 };
 
+                let updater = Hachimi::instance().tl_updater.clone();
+                let etag_to_skip = new_etag.clone();
+
                 mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
                     &t!("tl_update_dialog.title"),
                     &dialog_message,
-                    |ok| {
-                        if !ok { return; }
-                        Hachimi::instance().tl_updater.clone().run();
+                    move |ok| {
+                        if !ok {
+                            updater.skip_update(etag_to_skip);
+                            return;
+                        }
+                        updater.run();
                     }
                 )));
             }
         }
-        else if let Some(mutex) = Gui::instance() {
-            mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+        else {
+            if let Some(etag) = new_etag {
+                let mut updated_cache = repo_cache;
+                updated_cache.index_etag = Some(etag);
+                let _ = utils::write_json_file(&updated_cache, &cache_path);
+            }
+
+            if !silent {
+                if let Some(mutex) = Gui::instance() {
+                    mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+                }
+            }
         }
 
         Ok(())
@@ -465,6 +525,7 @@ impl Updater {
         // Save the repo cache (done last so if any of the previous fails, the entire update would be voided)
         let repo_cache = RepoCache {
             base_url: update_info.base_url.clone(),
+            index_etag: update_info.index_etag.clone(),
             files: cached_files.lock().unwrap().clone()
         };
         let cache_path = hachimi.get_data_path(REPO_CACHE_FILENAME);
