@@ -1097,7 +1097,7 @@ impl Gui {
         changed
     }
 
-    fn run_combo_menu<T: PartialEq + Copy>(
+    pub fn run_combo_menu<T: PartialEq + Copy>(
         ui: &mut egui::Ui,
         id_salt: impl std::hash::Hash,
         value: &mut T,
@@ -1106,7 +1106,6 @@ impl Gui {
     ) -> bool {
         let mut changed = false;
         let scale = get_scale(ui.ctx());
-        let fixed_width = 145.0 * scale;
         let row_height = 24.0 * scale;
         let padding = ui.spacing().button_padding;
 
@@ -1118,7 +1117,19 @@ impl Gui {
             .map(|(_, s)| *s)
             .unwrap_or("Unknown");
 
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(fixed_width, row_height), egui::Sense::hover());
+        let font_id = egui::TextStyle::Button.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(
+            selected_text.to_owned(),
+            font_id,
+            ui.visuals().text_color()
+        );
+
+        let icon_size = 12.0 * scale;
+        let desired_width = galley.size().x + icon_size + padding.x * 2.0 + 8.0 * scale;
+        let min_width = 145.0 * scale;
+        let popup_width = desired_width.max(min_width);
+
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(desired_width, row_height), egui::Sense::hover());
         let button_res = ui.interact(rect, button_id, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
@@ -1161,16 +1172,19 @@ impl Gui {
         .id(popup_id)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_width(fixed_width);
-            ui.set_max_width(fixed_width);
+            ui.set_width(popup_width);
+            ui.set_max_width(popup_width);
 
             ui.horizontal(|ui| {
-                let _res = ui.add_sized(
-                    [ui.available_width() - 30.0 * scale, row_height],
-                    egui::TextEdit::singleline(search_term).hint_text(t!("search_filter"))
-                );
-                #[cfg(target_os = "android")]
-                handle_android_keyboard(&_res, search_term);
+                egui::ScrollArea::neither()
+                    .show(ui, |ui| {
+                        let _res = ui.add_sized(
+                            [ui.available_width() - 30.0 * scale, row_height],
+                            egui::TextEdit::singleline(search_term).hint_text(t!("search_filter"))
+                        );
+                        #[cfg(target_os = "android")]
+                        handle_android_keyboard(&_res, search_term);
+                    });
 
                 if ui.button("X").clicked() {
                     search_term.clear();
