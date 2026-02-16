@@ -173,6 +173,14 @@ impl Updater {
         *self.skipped_etag.lock().unwrap() = etag;
     }
 
+    pub fn has_pending_update(&self) -> bool {
+        self.new_update.load().is_some()
+    }
+
+    pub fn clear_pending_update(&self) {
+        self.new_update.store(Arc::new(None));
+    }
+
     pub fn check_for_updates(self: Arc<Self>, pedantic: bool, silent: bool) {
         std::thread::spawn(move || {
             if let Err(e) = self.check_for_updates_internal(pedantic, silent) {
@@ -221,6 +229,10 @@ impl Updater {
         let Ok(_guard) = self.update_check_mutex.try_lock() else {
             return Ok(());
         };
+
+        if self.has_pending_update() {
+            return Ok(());
+        }
 
         let hachimi = Hachimi::instance();
         let config = hachimi.config.load();
@@ -405,11 +417,14 @@ impl Updater {
                     move |ok| {
                         if !ok {
                             updater.skip_update(etag_to_skip);
+                            updater.clear_pending_update();
                             return;
                         }
                         updater.run();
                     }
                 )));
+            } else {
+                self.clear_pending_update();
             }
         }
         else {
