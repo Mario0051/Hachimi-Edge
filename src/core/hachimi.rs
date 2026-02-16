@@ -299,6 +299,11 @@ impl Hachimi {
                         continue;
                     }
 
+                    if self.tl_updater.has_pending_update() {
+                        elapsed = 0;
+                        continue;
+                    }
+
                     elapsed += 5;
 
                     if elapsed >= config.bg_update_interval_sec {
