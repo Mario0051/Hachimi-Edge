@@ -553,6 +553,14 @@ unsafe extern "C" fn gui_ui_searchable_combobox(
     changed
 }
 
+unsafe extern "C" fn gui_save_menu_width() {
+    crate::core::gui::save_menu_width();
+}
+
+unsafe extern "C" fn gui_restore_menu_width() {
+    crate::core::gui::restore_menu_width();
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Vtable {
@@ -690,6 +698,8 @@ pub struct Vtable {
     pub gui_ui_searchable_combobox: unsafe extern "C" fn(
         ui: *mut c_void, id_salt: *const c_char, selected_value: *mut i32, item_values: *const i32, item_labels: *const *const c_char, item_count: usize
     ) -> bool,
+    pub gui_save_menu_width: unsafe extern "C" fn(),
+    pub gui_restore_menu_width: unsafe extern "C" fn(),
 }
 
 impl Vtable {
@@ -744,6 +754,8 @@ impl Vtable {
         android_dex_call_static_noargs,
         android_dex_call_static_string,
         gui_ui_searchable_combobox,
+        gui_save_menu_width,
+        gui_restore_menu_width,
     };
 
     pub fn instantiate() -> Self {
