@@ -303,7 +303,17 @@ impl Updater {
         let mut update_files: Vec<RepoFile> = Vec::new();
         let mut update_size: usize = 0;
         let mut total_size: usize = 0;
-        for file in index.files.iter() {
+
+        let total_files = index.files.len().max(1);
+        if let Some(mutex) = Gui::instance() {
+            mutex.lock().unwrap().update_progress_visible = true;
+        }
+
+        for (i, file) in index.files.iter().enumerate() {
+            if i % 50 == 0 {
+                self.progress.store(Arc::new(Some(UpdateProgress::new(i, total_files))));
+            }
+
             if file.path.contains("..") || Path::new(&file.path).has_root() {
                 warn!("File path '{}' sanitized", file.path);
                 continue;
@@ -351,6 +361,11 @@ impl Updater {
                 update_size += file.size;
             }
             total_size += file.size;
+        }
+
+        self.progress.store(Arc::new(None));
+        if let Some(mutex) = Gui::instance() {
+            mutex.lock().unwrap().update_progress_visible = false;
         }
 
         if !update_files.is_empty() {
