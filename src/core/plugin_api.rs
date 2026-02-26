@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void, CStr, CString};
 
 use once_cell::sync::OnceCell;
 use egui::Align;
@@ -8,6 +8,7 @@ use crate::{core::{gui, Hachimi, Interceptor}, il2cpp::{self, types::{il2cpp_arr
 const VERSION: i32 = 3;
 
 static PLUGIN_VTABLE: OnceCell<Vtable> = OnceCell::new();
+static DATA_DIR_CSTR: once_cell::sync::OnceCell<CString> = once_cell::sync::OnceCell::new();
 
 pub type HachimiInitFn = extern "C" fn(vtable: *const Vtable, version: i32) -> InitResult;
 pub type GuiMenuCallback = extern "C" fn(userdata: *mut c_void);
@@ -561,6 +562,14 @@ unsafe extern "C" fn gui_restore_menu_width() {
     crate::core::gui::restore_menu_width();
 }
 
+unsafe extern "C" fn hachimi_get_base_dir() -> *const c_char {
+    let s = DATA_DIR_CSTR.get_or_init(|| {
+        let path = &crate::core::Hachimi::instance().game.data_dir;
+        CString::new(path.to_string_lossy().into_owned()).unwrap()
+    });
+    s.as_ptr()
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Vtable {
@@ -700,6 +709,7 @@ pub struct Vtable {
     ) -> bool,
     pub gui_save_menu_width: unsafe extern "C" fn(),
     pub gui_restore_menu_width: unsafe extern "C" fn(),
+    pub hachimi_get_base_dir: unsafe extern "C" fn() -> *const c_char,
 }
 
 impl Vtable {
@@ -756,6 +766,7 @@ impl Vtable {
         gui_ui_searchable_combobox,
         gui_save_menu_width,
         gui_restore_menu_width,
+        hachimi_get_base_dir,
     };
 
     pub fn instantiate() -> Self {
