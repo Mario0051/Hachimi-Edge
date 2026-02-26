@@ -1577,7 +1577,7 @@ fn paginated_window_layout(
     open
 }
 
-fn async_request_ui_content<T: Send + Sync + 'static>(ui: &mut egui::Ui, request: Arc<AsyncRequest<T>>, add_contents: impl FnOnce(&mut egui::Ui, &T)) {
+fn async_request_ui_content<T: Send + Sync + 'static>(ui: &mut egui::Ui, request: Arc<AsyncRequest<T>>, on_retry: impl FnOnce(), add_contents: impl FnOnce(&mut egui::Ui, &T)) {
     let Some(result) = &**request.result.load() else {
         if !request.running() {
             request.call();
@@ -1626,7 +1626,7 @@ fn async_request_ui_content<T: Send + Sync + 'static>(ui: &mut egui::Ui, request
                 ui.vertical_centered(|ui| {
                     ui.label(text_job);
                     if ui.button(btn_text).clicked() {
-                        request.call();
+                        on_retry();
                     }
                 });
             });
@@ -1857,6 +1857,10 @@ impl ConfigEditor {
                             ..Default::default()
                         }
                     ));
+                }
+
+                if res.lost_focus() && config.meta_index_url.trim().is_empty() {
+                    config.meta_index_url = hachimi::Config::default().meta_index_url;
                 }
                 ui.end_row();
 
@@ -2365,6 +2369,10 @@ impl Window for FirstTimeSetupWindow {
                             }
 
                             if res.lost_focus() {
+                                if self.meta_index_url.trim().is_empty() {
+                                    self.meta_index_url = hachimi::Config::default().meta_index_url;
+                                }
+
                                 if self.meta_index_url != self.config.meta_index_url {
                                     self.config.meta_index_url = self.meta_index_url.clone();
                                     save_and_reload_config(self.config.clone());
@@ -2381,7 +2389,9 @@ impl Window for FirstTimeSetupWindow {
                         ui.label(t!("first_time_setup.select_translation_repo"));
                         ui.add_space(4.0);
 
-                        async_request_ui_content(ui, self.index_request.clone(), |ui, repo_list| {
+                        async_request_ui_content(ui, self.index_request.clone(), || {
+                            self.index_request = Arc::new(tl_repo::new_meta_index_request());
+                        }, |ui, repo_list| {
                             let hachimi = Hachimi::instance();
                             let current_lang_str = self.config.language.locale_str();
 
