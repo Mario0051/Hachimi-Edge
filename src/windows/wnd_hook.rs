@@ -111,6 +111,10 @@ extern "system" fn wnd_proc(hwnd: HWND, umsg: c_uint, wparam: WPARAM, lparam: LP
         input::process(&mut gui.input, zoom_factor, umsg, wparam.0, lparam.0);
     });
 
+    if !Gui::wants_input_atomic() {
+        return unsafe { orig_fn(hwnd, umsg, wparam, lparam) };
+    }
+
     LRESULT(0)
 }
 
