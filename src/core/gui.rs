@@ -556,10 +556,10 @@ impl Gui {
         let orientation_scale = 1.0;
         
         #[cfg(target_os = "windows")]
-        {
+        let orientation_scale = {
             let orientation_ratio = if is_landscape { height as f32 / width as f32 } else { 1.0 };
-            let orientation_scale = if is_landscape { orientation_ratio * Hachimi::instance().config.load().windows.gui_landscape_ratio } else { 1.0 };
-        }
+            if is_landscape { orientation_ratio * Hachimi::instance().config.load().windows.gui_landscape_ratio } else { 1.0 }
+        };
 
         let pixels_per_point = main_axis_size as f32 * PIXELS_PER_POINT_RATIO * orientation_scale;
         self.context.set_pixels_per_point(pixels_per_point);
@@ -1506,6 +1506,7 @@ fn new_window<'a>(ctx: &egui::Context, id: egui::Id, title: impl Into<egui::Widg
     .max_height(250.0 * scale)
     .collapsible(false)
     .resizable(false)
+    .constrain(false)
 }
 
 fn simple_window_layout(ui: &mut egui::Ui, id: egui::Id, add_contents: impl FnOnce(&mut egui::Ui), add_buttons: impl FnOnce(&mut egui::Ui)) {
