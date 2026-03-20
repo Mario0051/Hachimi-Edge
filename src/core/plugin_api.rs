@@ -555,12 +555,12 @@ unsafe extern "C" fn gui_ui_searchable_combobox(
     changed
 }
 
-unsafe extern "C" fn gui_save_menu_width() {
-    crate::core::gui::save_menu_width();
+unsafe extern "C" fn gui_get_menu_width() -> f32 {
+    gui::get_menu_width()
 }
 
-unsafe extern "C" fn gui_restore_menu_width() {
-    crate::core::gui::restore_menu_width();
+unsafe extern "C" fn gui_set_menu_width(width: f32) {
+    gui::set_menu_width(width);
 }
 
 unsafe extern "C" fn hachimi_get_base_dir() -> *const c_char {
@@ -716,8 +716,8 @@ pub struct Vtable {
     pub gui_ui_searchable_combobox: unsafe extern "C" fn(
         ui: *mut c_void, id_salt: *const c_char, selected_value: *mut i32, item_values: *const i32, item_labels: *const *const c_char, item_count: usize
     ) -> bool,
-    pub gui_save_menu_width: unsafe extern "C" fn(),
-    pub gui_restore_menu_width: unsafe extern "C" fn(),
+    pub gui_get_menu_width: unsafe extern "C" fn() -> f32,
+    pub gui_set_menu_width: unsafe extern "C" fn(width: f32),
     pub hachimi_get_base_dir: unsafe extern "C" fn() -> *const c_char,
     pub hachimi_get_data_path: unsafe extern "C" fn() -> *const c_char,
 }
@@ -774,8 +774,8 @@ impl Vtable {
         android_dex_call_static_noargs,
         android_dex_call_static_string,
         gui_ui_searchable_combobox,
-        gui_save_menu_width,
-        gui_restore_menu_width,
+        gui_get_menu_width,
+        gui_set_menu_width,
         hachimi_get_base_dir,
         hachimi_get_data_path,
     };
