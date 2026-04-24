@@ -1,5 +1,6 @@
 pub mod TextGenerator;
 pub mod Font;
+pub mod TextMesh;
 
 #[repr(i32)]
 pub enum TextAnchor {
@@ -19,4 +20,5 @@ pub fn init() {
 
     TextGenerator::init(image);
     Font::init(image);
+    TextMesh::init(image);
 }
