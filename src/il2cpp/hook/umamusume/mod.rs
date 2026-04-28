@@ -74,6 +74,14 @@ mod PartsSingleModeChoiceRewardTextElementViewModel;
 mod PartsCommonHeaderTitle;
 pub mod StoryParamChangeEffect;
 mod PartsRaceAnalyzeRaceEventListItem;
+mod Connecting;
+mod DownloadManager;
+mod DownloadView;
+mod HttpHelper;
+mod DownloadErrorProcessor;
+mod TitleViewController;
+mod Director;
+mod CySpringNative;
 
 pub fn init() {
     get_assembly_image_or_return!(image, "umamusume.dll");
@@ -153,4 +161,12 @@ pub fn init() {
     PartsCommonHeaderTitle::init(image);
     StoryParamChangeEffect::init(image);
     PartsRaceAnalyzeRaceEventListItem::init(image);
+    Connecting::init(image);
+    DownloadManager::init(image);
+    DownloadView::init(image);
+    HttpHelper::init(image);
+    DownloadErrorProcessor::init(image);
+    TitleViewController::init(image);
+    Director::init(image);
+    CySpringNative::init(image);
 }
