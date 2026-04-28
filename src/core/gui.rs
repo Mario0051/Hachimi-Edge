@@ -74,6 +74,7 @@ pub fn set_menu_width(width: f32) {
     }
 }
 
+
 type BoxedWindow = Box<dyn Window + Send + Sync>;
 pub struct Gui {
     pub context: egui::Context,
@@ -109,14 +110,16 @@ pub struct Gui {
     pub update_progress_visible: bool,
 
     notifications: Vec<Notification>,
-    windows: Vec<BoxedWindow>
+    windows: Vec<BoxedWindow>,
+
+    pub is_live_scene: bool,
 }
 
 const PIXELS_PER_POINT_RATIO: f32 = 3.0/1080.0;
 
 static INSTANCE: OnceCell<Mutex<Gui>> = OnceCell::new();
-static IS_CONSUMING_INPUT: AtomicBool = AtomicBool::new(false);
-static WANTS_INPUT: AtomicBool = AtomicBool::new(false);
+pub static IS_CONSUMING_INPUT: AtomicBool = AtomicBool::new(false);
+pub static WANTS_INPUT: AtomicBool = AtomicBool::new(false);
 static DISABLED_GAME_UIS: Lazy<Mutex<FnvHashSet<SendPtr>>> =
     Lazy::new(|| Mutex::new(FnvHashSet::default()));
 static PLUGIN_MENU_ITEMS: Lazy<Mutex<Vec<PluginMenuItem>>> = Lazy::new(|| Mutex::new(Vec::new()));
@@ -521,7 +524,9 @@ impl Gui {
             update_progress_visible: false,
 
             notifications: Vec::new(),
-            windows
+            windows,
+
+            is_live_scene: false,
         };
 
         unsafe {
@@ -594,6 +599,93 @@ impl Gui {
         }
         else {
             self.tmp_frame_count += 1;
+        }
+    }
+
+
+
+    fn run_live_slider(&mut self, ctx: &egui::Context) {
+        let config = crate::core::Hachimi::instance().config.load();
+        if !config.live_slider_always_show && !config.live_playback_loop { return; }
+
+        use crate::il2cpp::{ext::Il2CppStringExt, hook::UnityEngine_CoreModule::{SceneManager, Scene}};
+        let scene = SceneManager::GetActiveScene();
+        let name_ptr = Scene::GetNameInternal(scene.handle);
+        let scene_name = if name_ptr.is_null() { String::new() } else { unsafe { (*name_ptr).as_utf16str().to_string() } };
+
+        if scene_name != "Live" { return; }
+
+        unsafe {
+            let image = match crate::il2cpp::symbols::get_assembly_image(c"umamusume.dll") {
+                Ok(img) => img,
+                Err(_) => return
+            };
+            let dir_class = match crate::il2cpp::symbols::get_class(image, c"Gallop.Live", c"Director") {
+                Ok(k) => k,
+                Err(_) => return
+            };
+            let director = crate::il2cpp::symbols::SingletonLike::new(dir_class).unwrap().instance();
+            if director.is_null() { return; }
+
+            let get_current_time_addr = crate::il2cpp::symbols::get_method_addr_cached(dir_class, c"get_LiveCurrentTime", 0);
+            let get_total_time_addr = crate::il2cpp::symbols::get_method_addr_cached(dir_class, c"get_LiveTotalTime", 0);
+            if get_current_time_addr == 0 || get_total_time_addr == 0 { return; }
+
+            let get_current_time: extern "C" fn(*mut crate::il2cpp::types::Il2CppObject) -> f32 = std::mem::transmute(get_current_time_addr);
+            let get_total_time: extern "C" fn(*mut crate::il2cpp::types::Il2CppObject) -> f32 = std::mem::transmute(get_total_time_addr);
+
+            let mut current = get_current_time(director);
+            let total = get_total_time(director);
+            if total <= 0.0 { return; }
+
+            if config.live_playback_loop && current >= total - 0.1 {
+                crate::core::live_utils::move_live_playback(0.0);
+                current = 0.0;
+            }
+
+            let is_pause_live_addr = crate::il2cpp::symbols::get_method_addr_cached(dir_class, c"IsPauseLive", 0);
+            if is_pause_live_addr != 0 {
+                let is_pause_live: extern "C" fn(*mut crate::il2cpp::types::Il2CppObject) -> bool = std::mem::transmute(is_pause_live_addr);
+                if !config.live_slider_always_show && !is_pause_live(director) { return; }
+            } else if !config.live_slider_always_show {
+                return;
+            }
+
+            let scale = get_scale(ctx);
+            egui::Area::new(egui::Id::new("live_slider_area"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -40.0 * scale))
+                .show(ctx, |ui| {
+                    egui::Frame::window(&ctx.style())
+                        .fill(egui::Color32::from_black_alpha(150))
+                        .inner_margin(egui::Margin::symmetric((16.0 * scale) as i8, (8.0 * scale) as i8))
+                        .corner_radius(10.0 * scale)
+                        .show(ui, |ui| {
+                            ui.set_width(ctx.content_rect().width() * 0.7);
+                            ui.horizontal(|ui| {
+                                let curr_m = (current / 60.0).floor() as i32;
+                                let curr_s = (current % 60.0).floor() as i32;
+                                let tot_m = (total / 60.0).floor() as i32;
+                                let tot_s = (total % 60.0).floor() as i32;
+                                ui.label(format!("{:02}:{:02} / {:02}:{:02}", curr_m, curr_s, tot_m, tot_s));
+
+                                let available_w = ui.available_width();
+
+                                ui.scope(|ui| {
+                                    ui.spacing_mut().slider_width = available_w - (16.0 * scale);
+
+                                    let res = ui.add(
+                                        egui::Slider::new(&mut current, 0.0..=total)
+                                            .show_value(false)
+                                            .trailing_fill(true)
+                                    );
+
+                                    if res.changed() {
+                                        crate::core::live_utils::move_live_playback(current);
+                                    }
+                                });
+                            });
+                        });
+                });
         }
     }
 
@@ -714,8 +806,13 @@ impl Gui {
             self.last_focused = focused;
         }
 
+        let ctx = self.context.clone();
+        self.run_live_slider(&ctx);
+
+        let has_interactive_widgets = self.is_live_scene;
+
         // Store this as an atomic value so the input thread can check it without locking the gui
-        self.set_consuming_input(self.is_consuming_input());
+        IS_CONSUMING_INPUT.store(self.is_consuming_input() || has_interactive_widgets, atomic::Ordering::Relaxed);
 
         WANTS_INPUT.store(
             self.context.wants_pointer_input() || 
@@ -908,6 +1005,19 @@ impl Gui {
                                     }
                                 }
                             });
+
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(t!("config_editor.enable_smtc"));
+                                });
+                                if ui.checkbox(&mut self.config.windows.enable_smtc, "").changed() {
+                                    #[cfg(target_os = "windows")]
+                                    if self.config.windows.enable_smtc {
+                                        crate::windows::smtc::init(crate::windows::wnd_hook::get_target_hwnd());
+                                    }
+                                }
+                            });
+                            ui.end_row();
                         }
                         ui.separator();
 
@@ -1344,7 +1454,7 @@ impl Gui {
 
     pub fn is_empty(&self) -> bool {
         !self.splash_visible && !self.menu_visible && !self.update_progress_visible &&
-        self.notifications.is_empty() && self.windows.is_empty()
+        self.notifications.is_empty() && self.windows.is_empty() && !self.is_live_scene
     }
 
     pub fn is_consuming_input(&self) -> bool {
@@ -1775,7 +1885,37 @@ struct ConfigEditor {
     last_ptr_config: usize,
     config: hachimi::Config,
     id: egui::Id,
-    current_tab: ConfigEditorTab
+    current_tab: ConfigEditorTab,
+    champions_resources: Vec<String>,
+    font_color_options: Vec<String>,
+    outline_size_options: Vec<String>,
+    outline_color_options: Vec<String>,
+}
+
+fn get_enum_options(class_name: &std::ffi::CStr) -> Vec<String> {
+    use crate::il2cpp::{api::*, symbols::get_assembly_image, symbols::get_class};
+    let mut options = Vec::new();
+    let Ok(image) = get_assembly_image(c"umamusume.dll") else { return options };
+    let Ok(klass) = get_class(image, c"Gallop", class_name) else { return options };
+
+    if !il2cpp_class_is_enum(klass) { return options; }
+
+    let mut iter: *mut std::ffi::c_void = std::ptr::null_mut();
+    loop {
+        let field = il2cpp_class_get_fields(klass, &mut iter);
+        if field.is_null() { break; }
+        let attrs = il2cpp_field_get_flags(field);
+        if (attrs & 0x0040) != 0 {
+            let name_ptr = il2cpp_field_get_name(field);
+            if !name_ptr.is_null() {
+                let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) };
+                if let Ok(s) = name.to_str() {
+                    options.push(s.to_string());
+                }
+            }
+        }
+    }
+    options
 }
 
 #[derive(Eq, PartialEq, Clone, Copy)]
@@ -1802,7 +1942,11 @@ impl ConfigEditor {
             last_ptr_config: Arc::as_ptr(&handle) as usize,
             config: (**Hachimi::instance().config.load()).clone(),
             id: random_id(),
-            current_tab: ConfigEditorTab::General
+            current_tab: ConfigEditorTab::General,
+            champions_resources: crate::il2cpp::sql::get_champions_resources(),
+            font_color_options: get_enum_options(c"FontColorType"),
+            outline_size_options: get_enum_options(c"OutlineSizeType"),
+            outline_color_options: get_enum_options(c"OutlineColorType"),
         }
     }
 
@@ -1832,7 +1976,7 @@ impl ConfigEditor {
         }
     }
 
-    fn run_options_grid(config: &mut hachimi::Config, ui: &mut egui::Ui, tab: ConfigEditorTab) {
+    fn run_options_grid(&self, config: &mut hachimi::Config, ui: &mut egui::Ui, tab: ConfigEditorTab) {
         let scale = get_scale(ui.ctx());
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
@@ -2028,6 +2172,55 @@ impl ConfigEditor {
                     }
                 }
                 ui.end_row();
+
+                ui.label(t!("config_editor.dump_msgpack"));
+                ui.checkbox(&mut config.dump_msgpack, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.dump_msgpack_request"));
+                ui.checkbox(&mut config.dump_msgpack_request, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.msgpack_notifier"));
+                ui.checkbox(&mut config.msgpack_notifier, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.notification_tp"));
+                ui.checkbox(&mut config.notification_tp, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.notification_rp"));
+                ui.checkbox(&mut config.notification_rp, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.notification_jobs"));
+                ui.checkbox(&mut config.notification_jobs, "");
+                ui.end_row();
+
+                #[cfg(target_os = "windows")]
+                {
+                    ui.label(t!("config_editor.taskbar_show_progress_on_download"));
+                    ui.checkbox(&mut config.windows.taskbar_show_progress_on_download, "");
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.taskbar_show_progress_on_connecting"));
+                    ui.checkbox(&mut config.windows.taskbar_show_progress_on_connecting, "");
+                    ui.end_row();
+                }
+
+                if config.msgpack_notifier {
+                    ui.label(t!("config_editor.msgpack_notifier_request"));
+                    ui.checkbox(&mut config.msgpack_notifier_request, "");
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.msgpack_notifier_host"));
+                    ui.add(egui::TextEdit::singleline(&mut config.msgpack_notifier_host));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.msgpack_notifier_print_error"));
+                    ui.checkbox(&mut config.msgpack_notifier_print_error, "");
+                    ui.end_row();
+                }
             },
 
             ConfigEditorTab::Graphics => {
@@ -2138,6 +2331,10 @@ impl ConfigEditor {
                 ]);
                 ui.end_row();
 
+                ui.label(t!("config_editor.cyspring_mono_uncap_frame_scale"));
+                ui.checkbox(&mut config.cyspring_mono_uncap_frame_scale, "");
+                ui.end_row();
+
                 ui.label(t!("config_editor.story_choice_auto_select_delay"));
                 ui.add(egui::Slider::new(&mut config.story_choice_auto_select_delay, 0.1..=10.0).step_by(0.05));
                 ui.end_row();
@@ -2201,6 +2398,89 @@ impl ConfigEditor {
                     }
                 }
                 ui.end_row();
+
+                ui.label(t!("config_editor.unlock_live_chara"));
+                ui.checkbox(&mut config.unlock_live_chara, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.live_slider_always_show"));
+                ui.checkbox(&mut config.live_slider_always_show, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.live_playback_loop"));
+                ui.checkbox(&mut config.live_playback_loop, "");
+                ui.end_row();
+
+                ui.label(t!("config_editor.champions_live_show_text"));
+                ui.checkbox(&mut config.champions_live_show_text, "");
+                ui.end_row();
+
+                if config.champions_live_show_text {
+                    ui.label(t!("config_editor.champions_live_resource_id"));
+                    let mut choices: Vec<(i32, &str)> = Vec::new();
+                    for (i, name) in self.champions_resources.iter().enumerate() {
+                        choices.push(((i + 1) as i32, name.as_str()));
+                    }
+                    Gui::run_combo(ui, "champions_live_resource_id", &mut config.champions_live_resource_id, &choices);
+                    ui.end_row();
+                    ui.label(t!("config_editor.champions_live_year"));
+                    ui.add(egui::DragValue::new(&mut config.champions_live_year).range(2021..=2030));
+                    ui.end_row();
+                }
+
+                ui.label(t!("config_editor.captions"));
+                ui.checkbox(&mut config.caption.caption_enable, "");
+                ui.end_row();
+
+                if config.caption.caption_enable {
+                    ui.label(t!("config_editor.caption_lines_char_count"));
+                    ui.add(egui::Slider::new(&mut config.caption.caption_lines_char_count, 10..=100));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.caption_font_size"));
+                    ui.add(egui::Slider::new(&mut config.caption.caption_font_size, 10..=128));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.caption_pos_x"));
+                    ui.add(egui::Slider::new(&mut config.caption.caption_pos_x, -10.0..=10.0));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.caption_pos_y"));
+                    ui.add(egui::Slider::new(&mut config.caption.caption_pos_y, -10.0..=10.0));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.caption_bg_alpha"));
+                    ui.add(egui::Slider::new(&mut config.caption.caption_bg_alpha, 0.0..=1.0));
+                    ui.end_row();
+
+                    ui.label(t!("config_editor.caption_color"));
+                    egui::ComboBox::new(ui.id().with("caption_color"), "")
+                        .selected_text(&config.caption.caption_color)
+                        .show_ui(ui, |ui| {
+                            for option in &self.font_color_options {
+                                ui.selectable_value(&mut config.caption.caption_color, option.clone(), option);
+                            }
+                        });
+                    ui.end_row();
+                    ui.label(t!("config_editor.caption_outline_size"));
+                    egui::ComboBox::new(ui.id().with("caption_outline_size"), "")
+                        .selected_text(&config.caption.caption_outline_size)
+                        .show_ui(ui, |ui| {
+                            for option in &self.outline_size_options {
+                                ui.selectable_value(&mut config.caption.caption_outline_size, option.clone(), option);
+                            }
+                        });
+                    ui.end_row();
+                    ui.label(t!("config_editor.caption_outline_color"));
+                    egui::ComboBox::new(ui.id().with("caption_outline_color"), "")
+                        .selected_text(&config.caption.caption_outline_color)
+                        .show_ui(ui, |ui| {
+                            for option in &self.outline_color_options {
+                                ui.selectable_value(&mut config.caption.caption_outline_color, option.clone(), option);
+                            }
+                        });
+                    ui.end_row();
+                }
             }
         }
 
@@ -2231,6 +2511,7 @@ impl Window for ConfigEditor {
             config.windows.menu_open_key = global_handle.windows.menu_open_key;
         }
         let mut reset_clicked = false;
+        let mut save_clicked = false;
 
         new_window(ctx, self.id, t!("config_editor.title"))
         .open(&mut open)
@@ -2270,7 +2551,7 @@ impl Window for ConfigEditor {
                             .num_columns(2)
                             .spacing([40.0 * scale, 4.0 * scale])
                             .show(ui, |ui| {
-                                Self::run_options_grid(&mut config, ui, self.current_tab);
+                                self.run_options_grid(&mut config, ui, self.current_tab);
                             });
                         });
                         #[cfg(target_os = "android")]
@@ -2293,7 +2574,7 @@ impl Window for ConfigEditor {
                                 open2 = false;
                             }
                             if ui.button(t!("save")).clicked() {
-                                save_and_reload_config(self.config.clone());
+                                save_clicked = true;
                                 open2 = false;
                             }
                         });
@@ -2303,6 +2584,10 @@ impl Window for ConfigEditor {
         });
 
         self.config = config;
+
+        if save_clicked {
+            save_and_reload_config(self.config.clone());
+        }
 
         if reset_clicked {
             self.restore_defaults();

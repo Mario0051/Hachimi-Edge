@@ -72,6 +72,7 @@ pub mod UnityEngine_CoreModule;
 pub mod UnityEngine_AssetBundleModule;
 pub mod UnityEngine_TextRenderingModule;
 pub mod UnityEngine_ImageConversionModule;
+pub mod UnityEngine_UnityWebRequestModule;
 pub mod Unity_RenderPipelines_Universal_Runtime;
 pub mod UnityEngine_UI;
 pub mod UnityEngine_UIModule;
@@ -98,6 +99,7 @@ pub fn init() {
     UnityEngine_CoreModule::init();
     UnityEngine_TextRenderingModule::init();
     UnityEngine_ImageConversionModule::init();
+    UnityEngine_UnityWebRequestModule::init();
     Unity_RenderPipelines_Universal_Runtime::init();
     UnityEngine_UI::init();
     UnityEngine_UIModule::init();

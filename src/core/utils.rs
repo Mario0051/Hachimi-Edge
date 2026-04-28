@@ -5,6 +5,7 @@ use textwrap::{core::Word, wrap_algorithms, WordSeparator::UnicodeBreakPropertie
 use unicode_width::UnicodeWidthChar;
 use fnv::FnvHashMap;
 use once_cell::sync::Lazy;
+use egui::{text::LayoutJob, Color32, TextFormat, FontId, FontFamily};
 
 use crate::{core::Gui, il2cpp::{ext::{Il2CppStringExt, StringExt}, hook::umamusume::{Localize, TextId}, types::{Il2CppObject, Il2CppString}, symbols::Thread}};
 
@@ -675,4 +676,127 @@ pub fn notify_error(message: impl AsRef<str>) {
 
 pub fn mul_int (base:i32, mult: f32) -> i32 {
     (base as f32 * mult).round() as i32
+}
+
+pub fn get_proc_address(handle: usize, name: &std::ffi::CStr) -> usize {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows::utils::get_proc_address(windows::Win32::Foundation::HMODULE(handle as _), name)
+    }
+    #[cfg(target_os = "android")]
+    {
+        unsafe { libc::dlsym(handle as *mut libc::c_void, name.as_ptr()) as usize }
+    }
+}
+
+pub fn append_rich_text(
+    job: &mut LayoutJob,
+    text: &str,
+    base_size: f32,
+    base_color: Color32,
+    override_color: Option<Color32>,
+) {
+    let mut current_color = base_color;
+    let mut current_size = base_size;
+    let mut is_bold = false;
+    let mut is_italic = false;
+
+    let mut chars = text.char_indices().peekable();
+    let mut current_text = String::new();
+
+    let flush_text = |job: &mut LayoutJob, txt: &mut String, color: Color32, size: f32, bold: bool, italic: bool| {
+        if !txt.is_empty() {
+            let family = if bold {
+                FontFamily::Name("Bold".into())
+            } else if italic {
+                FontFamily::Name("Italic".into())
+            } else {
+                FontFamily::Proportional
+            };
+
+            let format = TextFormat {
+                font_id: FontId::new(size, family),
+                color: override_color.unwrap_or(color),
+                ..Default::default()
+            };
+
+            job.append(txt, 0.0, format);
+            txt.clear();
+        }
+    };
+
+    while let Some((_, c)) = chars.next() {
+        if c == '<' {
+            let mut tag = String::new();
+            let mut found_end = false;
+
+            while let Some(&(_j, tc)) = chars.peek() {
+                chars.next();
+                if tc == '>' {
+                    found_end = true;
+                    break;
+                }
+                tag.push(tc);
+            }
+
+            if found_end {
+                flush_text(job, &mut current_text, current_color, current_size, is_bold, is_italic);
+
+                let tag_lower = tag.to_lowercase();
+
+                if tag_lower == "b" {
+                    is_bold = true;
+                } else if tag_lower == "/b" {
+                    is_bold = false;
+                } else if tag_lower == "i" {
+                    is_italic = true;
+                } else if tag_lower == "/i" {
+                    is_italic = false;
+                }
+                else if tag_lower.starts_with("color=") {
+                    let color_val = &tag[6..];
+                    current_color = parse_hex_color(color_val).unwrap_or(base_color);
+                } else if tag_lower == "/color" {
+                    current_color = base_color;
+                }
+                else if tag_lower.starts_with("size=") {
+                    let size_str = tag[5..].replace("%", "");
+                    if let Ok(s) = size_str.parse::<f32>() {
+                        current_size = if tag.ends_with('%') { base_size * (s / 100.0) } else { s };
+                    }
+                } else if tag_lower == "/size" {
+                    current_size = base_size;
+                }
+
+                continue;
+            } else {
+                current_text.push('<');
+                current_text.push_str(&tag);
+            }
+        } else {
+            current_text.push(c);
+        }
+    }
+
+    flush_text(job, &mut current_text, current_color, current_size, is_bold, is_italic);
+}
+
+fn parse_hex_color(hex: &str) -> Option<Color32> {
+    let hex = hex.trim_start_matches('#');
+    let (r, g, b, a) = match hex.len() {
+        6 => (
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            255
+        ),
+        8 => (
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            u8::from_str_radix(&hex[6..8], 16).ok()?
+        ),
+        _ => return None,
+    };
+    Some(Color32::from_rgba_premultiplied(r, g, b, a))
 }
