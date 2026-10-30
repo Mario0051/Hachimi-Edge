@@ -28,6 +28,10 @@ pub fn on_il2cpp_loaded(header_addr: usize, slide: isize) {
 
     super::symbols_impl::init_exports(header_addr, slide);
 
+    unsafe {
+        crate::ios::interceptor_impl::init_aot_table(header_addr);
+    }
+
     let il2cpp_init_addr = unsafe { crate::il2cpp::symbols::dlsym("il2cpp_init") };
 
     if il2cpp_init_addr != 0 {

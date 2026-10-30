@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicPtr, AtomicBool, Ordering};
 use std::ptr;
 use objc2::{msg_send, sel};
 use objc2::runtime::{AnyClass, AnyObject, Sel};
-use objc2::ffi::{class_getInstanceMethod, method_setImplementation, object_getClass, IMP};
+use objc2::ffi::{class_getInstanceMethod, method_setImplementation, object_getClass, class_addMethod, method_exchangeImplementations, IMP};
 
 static ORIG_NEXT_DRAWABLE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 static ORIG_PRESENT: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
@@ -33,11 +33,20 @@ extern "C" fn hooked_next_drawable(self_layer: *mut AnyObject, sel: Sel) -> *mut
 
             if !method.is_null() {
                 let hooked_imp: IMP = Some(std::mem::transmute(hooked_present as extern "C" fn(*mut AnyObject, Sel)));
-                let orig_present = method_setImplementation(method, hooked_imp);
-                if let Some(orig) = orig_present {
-                    ORIG_PRESENT.store(orig as *mut _, Ordering::Relaxed);
-                }
-                info!("iOS: CAMetalDrawable 'present' swizzled on the fly!");
+                let types = b"v@:\0".as_ptr() as *const i8;
+                let hachimi_sel = sel!(hachimi_present);
+
+                let _ = class_addMethod(
+                    drawable_class as *mut _,
+                    hachimi_sel.as_ptr() as *const _,
+                    hooked_imp,
+                    types
+                );
+
+                let new_method = class_getInstanceMethod(drawable_class, hachimi_sel.as_ptr() as *const _);
+                method_exchangeImplementations(method as *mut _, new_method as *mut _);
+
+                info!("iOS: CAMetalDrawable 'present' swizzled safely!");
                 DRAWABLE_SWIZZLED.store(true, Ordering::Relaxed);
             }
         }
@@ -101,11 +110,7 @@ extern "C" fn hooked_present(self_drawable: *mut AnyObject, sel: Sel) {
             }
         }
 
-        let orig_present_ptr = ORIG_PRESENT.load(Ordering::Relaxed);
-        if !orig_present_ptr.is_null() {
-            let orig_fn: extern "C" fn(*mut AnyObject, Sel) = std::mem::transmute(orig_present_ptr);
-            orig_fn(self_drawable, sel);
-        }
+        let _: () = msg_send![self_drawable, hachimi_present];
     }
 }
 

@@ -647,7 +647,7 @@ pub fn get_data_path() -> String {
     #[cfg(target_os = "ios")]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/var/mobile".to_string());
-        format!("{}/Documents/hachimi", home)
+        format!("{}/Documents", home)
     }
 }
 

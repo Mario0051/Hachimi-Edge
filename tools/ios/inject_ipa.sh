@@ -16,21 +16,41 @@
 # On Windows: run this via GitHub Actions macOS runner or WSL with Homebrew.
 set -e
 
-INPUT_IPA="${1:?Usage: $0 <input.ipa> <libhachimi.dylib> [output.ipa] [--display-name NAME] [--files-sharing]}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AOT_PATCHER="$SCRIPT_DIR/aot_patcher.py"
+
+INPUT_IPA="${1:?Usage: $0 <input.ipa> <libhachimi.dylib> [output.ipa] [--hooks-json FILE] [--display-name NAME] [--files-sharing]}"
 DYLIB="${2:?Usage: $0 <input.ipa> <libhachimi.dylib> [output.ipa]}"
-OUTPUT_IPA="${3:-$(dirname "$INPUT_IPA")/$(basename "${INPUT_IPA%.ipa}")_hachimi.ipa}"
+
+if [[ "${3:-}" == --* || -z "${3:-}" ]]; then
+    OUTPUT_IPA="$(dirname "$INPUT_IPA")/$(basename "${INPUT_IPA%.ipa}")_hachimi.ipa"
+    shift 2 2>/dev/null || true
+else
+    OUTPUT_IPA="$3"
+    shift 3 2>/dev/null || true
+fi
 
 # ── Parse extra options ──────────────────────────────────────────
 DISPLAY_NAME=""
 FILES_SHARING=false
-shift 3 2>/dev/null || shift $# 2>/dev/null || true
+HOOKS_JSON=""
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --display-name) DISPLAY_NAME="$2"; shift 2 ;;
         --files-sharing) FILES_SHARING=true; shift ;;
+        --hooks-json)   HOOKS_JSON="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
+
+if [[ -z "$HOOKS_JSON" ]]; then
+    if [[ -f "hooks.json" ]]; then
+        HOOKS_JSON="hooks.json"
+    elif [[ -f "$SCRIPT_DIR/hooks.json" ]]; then
+        HOOKS_JSON="$SCRIPT_DIR/hooks.json"
+    fi
+fi
 
 # ── Entitlements for re-signing ───────────────────────────────────
 ENTITLEMENTS_PLIST="$(mktemp /tmp/hachimi_entitlements.XXXXXX.plist)"
@@ -39,15 +59,7 @@ cat > "$ENTITLEMENTS_PLIST" <<'PLIST_EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Prevents EXC_BAD_ACCESS from AMFI code-sign checks -->
   <key>get-task-allow</key><true/>
-  <!-- Allows Dobby to allocate JIT trampoline pages (prevents KERN_PROTECTION_FAILURE) -->
-  <key>com.apple.security.cs.allow-jit</key><true/>
-  <!-- Allows writable+executable memory pages needed for inline hooks -->
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-  <!-- Skip library team-id validation (TrollStore / jailbreak only) -->
-  <!-- Remove this line if using free Sideloadly / ESign account -->
-  <key>com.apple.private.skip-library-validation</key><true/>
 </dict>
 </plist>
 PLIST_EOF
@@ -62,6 +74,7 @@ check_cmd() {
 check_cmd zip zip
 check_cmd unzip unzip
 check_cmd ldid ldid
+check_cmd python3 python3
 # optool is optional; fallback to insert_dylib if available
 USE_OPTOOL=false
 USE_INSERT_DYLIB=false
@@ -76,7 +89,7 @@ fi
 
 # ── Workspace ─────────────────────────────────────────────────────
 WORK_DIR="$(mktemp -d /tmp/hachimi_inject.XXXXXX)"
-trap "rm -rf '$WORK_DIR'" EXIT
+trap "rm -rf '$WORK_DIR' '$ENTITLEMENTS_PLIST'" EXIT
 
 echo "[inject] Extracting IPA..."
 unzip -q "$INPUT_IPA" -d "$WORK_DIR"
@@ -90,6 +103,21 @@ fi
 APP_NAME=$(basename "$APP_BUNDLE" .app)
 APP_EXEC="$APP_BUNDLE/$APP_NAME"
 echo "[inject] App bundle : $APP_BUNDLE"
+
+UNITY_FW="$APP_BUNDLE/Frameworks/UnityFramework.framework/UnityFramework"
+if [[ -f "$UNITY_FW" ]]; then
+    if [[ -n "$HOOKS_JSON" && -f "$HOOKS_JSON" ]]; then
+        echo "[inject] Applying AOT JIT-less patches using $HOOKS_JSON..."
+        python3 "$AOT_PATCHER" "$UNITY_FW" "$HOOKS_JSON" "$UNITY_FW.tmp"
+        mv "$UNITY_FW.tmp" "$UNITY_FW"
+        chmod 755 "$UNITY_FW"
+        echo "[inject] UnityFramework successfully patched."
+    else
+        echo "[inject] WARN: hooks.json not found. Skipping AOT binary patching."
+    fi
+else
+    echo "[inject] WARN: UnityFramework not found at $UNITY_FW"
+fi
 
 # ── Copy dylib into Frameworks ────────────────────────────────────
 mkdir -p "$APP_BUNDLE/Frameworks"
@@ -114,6 +142,10 @@ fi
 # ── Fake-sign dylib with ldid ─────────────────────────────────────
 echo "[inject] Fake-signing dylib..."
 ldid -S "$APP_BUNDLE/Frameworks/libhachimi.dylib"
+
+if [[ -f "$UNITY_FW" ]]; then
+    ldid -S "$UNITY_FW"
+fi
 
 # ── Re-sign the entire .app with entitlements ─────────────────────
 # Note: for TrollStore, fake-sign is enough. For Sideloadly, use real cert below.
@@ -150,9 +182,9 @@ if $FILES_SHARING; then
     echo "[inject] Files app sharing → enabled"
 fi
 
-pushd "$WORK_DIR" > /dev/null
-# Resolve output path to absolute BEFORE pushd changes cwd
+mkdir -p "$(dirname "$OUTPUT_IPA")"
 ABS_OUTPUT_IPA="$(cd "$(dirname "$OUTPUT_IPA")" 2>/dev/null && pwd)/$(basename "$OUTPUT_IPA")"
+pushd "$WORK_DIR" > /dev/null
 zip -qr "$ABS_OUTPUT_IPA" Payload
 popd > /dev/null
 
