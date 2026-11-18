@@ -7,7 +7,7 @@ use widestring::Utf16Str;
 use crate::{
     core::{ext::Utf16StringExt, hachimi::AssetInfo, Hachimi},
     il2cpp::{
-        api::{il2cpp_class_get_type, il2cpp_type_get_object}, ext::{Il2CppStringExt, StringExt}, hook::{UnityEngine_AssetBundleModule::AssetBundle, UnityEngine_CoreModule::Object}, symbols::{get_field_from_name, get_field_object_value, IList}, types::*, utils::replace_texture_with_diff
+        api::{il2cpp_class_get_type, il2cpp_type_get_object}, ext::{Il2CppStringExt, StringExt}, hook::{Plugins::AnimateToUnity::AnKeyParameter, UnityEngine_AssetBundleModule::AssetBundle, UnityEngine_CoreModule::Object}, symbols::{IList, get_field_from_name, get_field_object_value}, types::*, utils::replace_texture_with_diff
     }
 };
 
@@ -55,7 +55,8 @@ struct AnMotionParameterData {
 #[derive(Deserialize)]
 struct AnObjectParameterBaseData {
     position_offset: Option<Vector3_t>,
-    scale: Option<Vector3_t>
+    scale: Option<Vector3_t>,
+    anim_pos_offset_adj: Option<Vector2_t>
 }
 
 #[derive(Deserialize)]
@@ -156,7 +157,7 @@ pub fn patch_asset(this: *mut Il2CppObject, data_opt: Option<&AnRootData>) {
                     warn!("Failed to get text_param_list for motion param {}", *i);
                      continue;
                  };
-                
+
                 for (j, text_param_data) in motion_param_data.text_param_list.iter() {
                     let Some(text_param) = text_param_list.get(*j) else {
                         warn!("text param {} of motion param {} out of range (max {})", *j, *i, text_param_list.count());
@@ -170,7 +171,7 @@ pub fn patch_asset(this: *mut Il2CppObject, data_opt: Option<&AnRootData>) {
                     if let Some(position_offset) = &text_param_data.base.position_offset {
                         AnObjectParameterBase::set__positionOffset(text_param, position_offset);
                     }
-                                                                        
+
                     if let Some(scale) = &text_param_data.base.scale {
                         AnObjectParameterBase::set__scale(text_param, scale);
                     }
@@ -192,9 +193,34 @@ pub fn patch_asset(this: *mut Il2CppObject, data_opt: Option<&AnRootData>) {
                     if let Some(position_offset) = &plane_param_data.base.position_offset {
                         AnObjectParameterBase::set__positionOffset(plane_param, position_offset);
                     }
-                                                                        
                     if let Some(scale) = &plane_param_data.base.scale {
                         AnObjectParameterBase::set__scale(plane_param, scale);
+                    }
+                    if let Some(anim_pos_offset) = &plane_param_data.base.anim_pos_offset_adj {
+                        // Count should be 3 if present, representing XYZ axes. We ignore Z.
+                        if let Some(pos_offset_keyparam_list) = IList::new(AnObjectParameterBase::get__positionOffsetKeyParamList(plane_param)) {
+                            if pos_offset_keyparam_list.count() > 1 {
+                                let x_axis_key_param = pos_offset_keyparam_list.get(0).unwrap();
+                                if let Some(x_axis_key_list) = IList::<Vector2_t>::new(AnKeyParameter::get__keyList(x_axis_key_param)) {
+                                    for k in 0..x_axis_key_list.count() {
+                                        let mut key_values = x_axis_key_list.get(k).unwrap();
+                                        key_values.y += anim_pos_offset.x;
+                                        x_axis_key_list.set(k, key_values);
+                                    }
+                                }
+                                let y_axis_key_param = pos_offset_keyparam_list.get(1).unwrap();
+                                if let Some(y_axis_key_list) = IList::<Vector2_t>::new(AnKeyParameter::get__keyList(y_axis_key_param)) {
+                                    for k in 0..y_axis_key_list.count() {
+                                        let mut key_values = y_axis_key_list.get(k).unwrap();
+                                        key_values.y += anim_pos_offset.y;
+                                        y_axis_key_list.set(k, key_values);
+                                    }
+                                }
+                            }
+                        }
+                        else {
+                            warn!("Failed to get pos_offset_keyparams for plane param {} of motion param {}", *j, *i);
+                        }
                     }
                 }
             }

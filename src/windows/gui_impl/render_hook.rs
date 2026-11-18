@@ -3,10 +3,10 @@ use std::{os::raw::{c_uint, c_void}, sync::Mutex};
 
 use once_cell::sync::OnceCell;
 use windows::{
-    core::{w, Interface, HRESULT},
+    core::{HRESULT, Interface, w},
     Win32::{
         Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM}, Graphics::{
-            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0},
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::{D3D11CreateDeviceAndSwapChain, ID3D11Device, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION},
             Dxgi::{
                 Common::{DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_UNORM},
@@ -22,7 +22,7 @@ use windows::{
     }
 };
 
-use crate::{core::{Error, Gui, Hachimi, Interceptor}, windows::wnd_hook};
+use crate::{core::{Error, Gui, Hachimi, Interceptor}, il2cpp::{hook::UnityEngine_InputLegacyModule, symbols::Thread, types::Vector2_t}, windows::wnd_hook};
 
 use super::d3d11_painter::D3D11Painter;
 
@@ -45,10 +45,23 @@ fn check_hwnd(this: *mut c_void) -> HWND {
     }
 }
 
+static IME_COMPOSITION_POS: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
+
 static mut PRESENT_ADDR: usize = 0; 
 type PresentFn = extern "C" fn(this: *mut c_void, sync_interval: c_uint, flags: c_uint) -> HRESULT;
 extern "C" fn IDXGISwapChain_Present(this: *mut c_void, sync_interval: c_uint, flags: c_uint) -> HRESULT {
     let orig_fn: PresentFn = unsafe { std::mem::transmute(PRESENT_ADDR) };
+
+    // Call plugin present callbacks FIRST, before any checks
+    let hachimi = Hachimi::instance();
+    let callbacks = hachimi.present_callbacks.lock().unwrap();
+    for (callback, userdata) in callbacks.iter() {
+        if *callback == 0 {
+            continue;
+        }
+        let callback: unsafe extern "C" fn(*mut c_void, *mut c_void) = unsafe { std::mem::transmute(*callback) };
+        unsafe { callback(this, *userdata as *mut c_void); }
+    }
 
     let hwnd = check_hwnd(this);
     if hwnd.0 == std::ptr::null_mut() {
@@ -91,6 +104,29 @@ extern "C" fn IDXGISwapChain_Present(this: *mut c_void, sync_interval: c_uint, f
 
     // Run and render the GUI
     let output = gui.run();
+
+    for (_viewport_id, viewport_output) in &output.viewport_output {
+        for cmd in &viewport_output.commands {
+            // Intercept egui telling the OS where the text cursor currently is
+            if let egui::ViewportCommand::IMERect(rect) = cmd {
+                // Windows IME boxes usually look best positioned at the bottom-left of the cursor.
+                let zoom = gui.context.zoom_factor();
+                let x = rect.min.x * zoom;
+                let y = rect.max.y * zoom;
+                let y_unity = height as f32 - y;
+                *IME_COMPOSITION_POS.lock().unwrap() = (x, y_unity);
+
+                Thread::main_thread().schedule(|| {
+                    let (x, y_unity) = *IME_COMPOSITION_POS.lock().unwrap();
+
+                    UnityEngine_InputLegacyModule::Input::set_compositionCursorPos(
+                        Vector2_t { x, y: y_unity }
+                    );
+                });
+            }
+        }
+    }
+
     let (mut renderer_output, _, _) = egui_directx11::split_output(output);
 
     let layout_pixels_per_point = renderer_output.pixels_per_point;
@@ -217,9 +253,9 @@ fn get_swap_chain_vtable() -> Result<*mut usize, Error> {
     swap_chain_desc.BufferCount = 1;
     swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swap_chain_desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	swap_chain_desc.OutputWindow = hwnd;
-	swap_chain_desc.SampleDesc.Count = 1;
-	swap_chain_desc.Windowed = true.into();
+    swap_chain_desc.OutputWindow = hwnd;
+    swap_chain_desc.SampleDesc.Count = 1;
+    swap_chain_desc.Windowed = true.into();
 
     let mut p_swap_chain: Option<IDXGISwapChain> = None;
     let mut p_device: Option<ID3D11Device> = None;
@@ -227,7 +263,7 @@ fn get_swap_chain_vtable() -> Result<*mut usize, Error> {
 
     unsafe {
         D3D11CreateDeviceAndSwapChain(
-            None, D3D_DRIVER_TYPE_HARDWARE, HMODULE::default(), D3D11_CREATE_DEVICE_FLAG(0), Some(&[D3D_FEATURE_LEVEL_11_0]),
+            None, D3D_DRIVER_TYPE_HARDWARE, HMODULE::default(), D3D11_CREATE_DEVICE_FLAG(0), Some(&[D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0,]),
             D3D11_SDK_VERSION, Some(&swap_chain_desc), Some(&mut p_swap_chain), Some(&mut p_device),
             Some(&mut feature_level), None
         )

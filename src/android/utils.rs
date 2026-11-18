@@ -112,6 +112,7 @@ pub fn check_keyboard_status() -> bool {
     is_visible
 }
 
+#[allow(dead_code)]
 pub fn open_app_or_fallback(package_name: &str, activity_class: &str, fallback_url: &str) {
     let vm = match java_vm() {
         Some(v) => v,
@@ -196,8 +197,7 @@ pub fn get_activity(mut env: JNIEnv<'_>) -> Option<JObject<'_>> {
         .iter(&mut env)
         .ok()?
         .next(&mut env)
-        .ok()??
-        ;
+        .ok()??;
     let activity = env
         .get_field(activity_record, "activity", "Landroid/app/Activity;")
         .ok()?
@@ -233,8 +233,122 @@ pub fn get_screen_dimensions(mut env: JNIEnv) -> (i32, i32) {
     (width, height)
 }
 
+pub fn set_audio_capture_policy_all() {
+    let vm = java_vm().expect("JavaVM not initialized");
+    let mut env = vm.attach_current_thread().expect("Failed to attach thread");
+
+    let result = (|| -> jni::errors::Result<()> {
+        let api_level = get_device_api_level(env.get_native_interface());
+        if api_level < 29 {
+            info!("setAllowedCapturePolicy ignored: API level {} is below 29", api_level);
+            return Ok(());
+        }
+
+        let activity = get_activity(unsafe { env.unsafe_clone() })
+            .ok_or(jni::errors::Error::JavaException)?;
+
+        let context_class = env.find_class("android/content/Context")?;
+        let audio_service_str = env.get_static_field(context_class, "AUDIO_SERVICE", "Ljava/lang/String;")?.l()?;
+
+        let audio_manager = env.call_method(
+            &activity, 
+            "getSystemService", 
+            "(Ljava/lang/String;)Ljava/lang/Object;", 
+            &[JValue::from(&audio_service_str)]
+        )?.l()?;
+
+        if audio_manager.is_null() {
+            return Err(jni::errors::Error::JavaException);
+        }
+
+        let allow_capture_by_all: i32 = 1;
+        env.call_method(
+            &audio_manager, 
+            "setAllowedCapturePolicy", 
+            "(I)V", 
+            &[JValue::Int(allow_capture_by_all)]
+        )?;
+
+        info!("Successfully set AudioManager capture policy to ALLOW_CAPTURE_BY_ALL");
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        info!("JNI Audio Error: {:?}", e);
+    }
+}
+
 pub fn get_game_dir() -> PathBuf {
     let package_name = game_impl::get_package_name();
     game_impl::get_data_dir(&package_name)
 }
 
+pub fn get_available_disk_space() -> Option<u64> {
+    let vm = java_vm().expect("JavaVM not initialized");
+    let mut env = vm.attach_current_thread().expect("Failed to attach thread");
+
+    let result = (|| -> jni::errors::Result<u64> {
+        let activity = get_activity(unsafe { env.unsafe_clone() })
+            .ok_or(jni::errors::Error::JavaException)?;
+
+        // activity.getDataDir()
+        let data_dir = env.call_method(&activity, "getDataDir", "()Ljava/io/File;", &[])?.l()?;
+
+        // dataDir.getFreeSpace()
+        let free_bytes = env.call_method(&data_dir, "getFreeSpace", "()J", &[])?.j()?;
+
+        Ok(free_bytes as u64)
+    })();
+
+    match result {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            info!("get_available_disk_space: JNI Error: {:?}", e);
+            None
+        }
+    }
+}
+pub fn set_clipboard_text(text: &str) -> bool {
+    let vm = java_vm().expect("JavaVM not initialized");
+    let mut env = vm.attach_current_thread().expect("Failed to attach thread");
+
+    let result = (|| -> jni::errors::Result<()> {
+        let activity = get_activity(unsafe { env.unsafe_clone() })
+            .ok_or(jni::errors::Error::JavaException)?;
+
+        let context_class = env.find_class("android/content/Context")?;
+        let clip_service_name = env.get_static_field(context_class, "CLIPBOARD_SERVICE", "Ljava/lang/String;")?.l()?;
+
+        let clipboard = env.call_method(
+            &activity,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::from(&clip_service_name)]
+        )?.l()?;
+
+        let jtext = env.new_string(text)?;
+        let clip_data_class = env.find_class("android/content/ClipData")?;
+        let clip = env.call_static_method(
+            clip_data_class,
+            "newPlainText",
+            "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;",
+            &[JValue::from(&jtext), JValue::from(&jtext)]
+        )?.l()?;
+
+        env.call_method(&clipboard, "setPrimaryClip", "(Landroid/content/ClipData;)V", &[JValue::from(&clip)])?;
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            info!("JNI Clipboard Error: {:?}", e);
+            false
+        }
+    }
+}

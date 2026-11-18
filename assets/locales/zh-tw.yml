@@ -68,6 +68,7 @@ notification:
   update_completed: "更新完成。"
   errors_during_update: "更新時發生 %{count} 個錯誤，請確認日誌以獲取更多資訊。"
   checking_for_updates: "檢查更新"
+  github_update_unreachable: "無法連線至 GitHub，正在嘗試改用 Codeberg 中⋯⋯"
   no_updates: "無可用的更新。"
   ipc_softreset_exec: "已遠端軟重啟（IPC）。"
 
@@ -115,6 +116,8 @@ config_editor:
     如果是不小心誤觸此選項，請關閉此對話框並禁用該選項。
   ipv4_only: "僅限 IPv4 ureq"
   meta_index_url: "翻譯 Meta URL"
+  custom_font_file: "自訂字體"
+  custom_font_none_found: "找不到 .hachifont 字體包"
   debug_mode: "除錯模式"
   enable_file_logging: "啟用檔案記錄"
   apply_atlas_workaround: "套用 TL Atlas 修復"
@@ -160,7 +163,7 @@ config_editor:
   hide_ingame_ui_hotkey: "隱藏遊戲內 UI 快捷鍵"
   hide_ingame_ui_hotkey_info: >-
     此選項允許使用快捷鍵切換遊戲內介面（UI）的顯示。
-    Android 端，您需要雙擊「音量上鍵」，或連續三次點擊螢幕右上角。
+    Android 端，可連續三次點擊螢幕右上角。
     對於配備鍵盤的 PC/Android 裝置，預設按鍵為 Insert，並可在 GUI 或設定檔中進行更改。
   menu_open_key: "選單開啟熱鍵"
   menu_open_key_set: "按下按鍵進行設定"

@@ -1,15 +1,38 @@
-use crate::{core::{Hachimi, utils::wrap_fit_text_il2cpp}, il2cpp::{api::{il2cpp_class_get_type, il2cpp_type_get_object}, ext::{Il2CppStringExt, LocalizedDataExt}, hook::UnityEngine_UI::Text, symbols::get_method_addr, types::*}};
+use crate::{core::{Hachimi, utils::wrap_fit_text_il2cpp}, il2cpp::{ext::{Il2CppStringExt, LocalizedDataExt}, hook::UnityEngine_UI::Text, symbols::{get_method_addr, get_type_object_for_class}, types::*}};
 
 static mut TYPE_OBJECT: *mut Il2CppObject = 0 as _;
 pub fn type_object() -> *mut Il2CppObject {
     unsafe { TYPE_OBJECT }
 }
 
+static mut GET_IS_ACTIVE_IN_HIERARCHY_ADDR: usize = 0;
+impl_addr_wrapper_fn!(get_IsActiveInHierarchy, GET_IS_ACTIVE_IN_HIERARCHY_ADDR, bool, this: *mut Il2CppObject);
+
+static mut SET_FONTCOLOR_ADDR: usize = 0;
+impl_addr_wrapper_fn!(set_FontColor, SET_FONTCOLOR_ADDR, (), this: *mut Il2CppObject, value: i32);
+
+static mut SET_OUTLINESIZE_ADDR: usize = 0;
+impl_addr_wrapper_fn!(set_OutlineSize, SET_OUTLINESIZE_ADDR, (), this: *mut Il2CppObject, value: i32);
+
+static mut UPDATEOUTLINE_ADDR: usize = 0;
+impl_addr_wrapper_fn!(UpdateOutline, UPDATEOUTLINE_ADDR, (), this: *mut Il2CppObject);
+
+static mut SET_OUTLINECOLOR_ADDR: usize = 0;
+impl_addr_wrapper_fn!(set_OutlineColor, SET_OUTLINECOLOR_ADDR, (), this: *mut Il2CppObject, value: i32);
+
+static mut REBUILDOUTLINE_ADDR: usize = 0;
+impl_addr_wrapper_fn!(RebuildOutline, REBUILDOUTLINE_ADDR, (), this: *mut Il2CppObject);
+
 type AwakeFn = extern "C" fn(this: *mut Il2CppObject);
 extern "C" fn Awake(this: *mut Il2CppObject) {
     get_orig_fn!(Awake, AwakeFn)(this);
 
     let localized_data = Hachimi::instance().localized_data.load();
+    let config = Hachimi::instance().config.load();
+
+    if config.replace_to_builtin_font {
+        Text::AssignDefaultFont(this);
+    }
 
     let font = localized_data.load_replacement_font();
     if !font.is_null() {
@@ -19,6 +42,17 @@ extern "C" fn Awake(this: *mut Il2CppObject) {
     if localized_data.config.text_common_allow_overflow {
         Text::set_horizontalOverflow(this, 1);
         Text::set_verticalOverflow(this, 1);
+    }
+
+    if localized_data.config.text_common_best_fit {
+        // Do not touch game-set instances as they likely use special values.
+        if Text::get_best_fit(this) {
+            return;
+        }
+        let cur_size = Text::get_fontSize(this);
+        Text::set_best_fit_min_size(this, cur_size.min(10));
+        Text::set_best_fit_max_size(this, cur_size);
+        Text::set_best_fit(this, true);
     }
 }
 
@@ -67,6 +101,12 @@ pub fn init(umamusume: *const Il2CppImage) {
     new_hook!(SetSystemTextWithLineHeadWrap_addr, SetSystemTextWithLineHeadWrap);
 
     unsafe {
-        TYPE_OBJECT = il2cpp_type_get_object(il2cpp_class_get_type(TextCommon));
+        TYPE_OBJECT = get_type_object_for_class(TextCommon);
+        GET_IS_ACTIVE_IN_HIERARCHY_ADDR = get_method_addr(TextCommon, c"get_IsActiveInHierarchy", 0);
+        SET_FONTCOLOR_ADDR = get_method_addr(TextCommon, c"set_FontColor", 1);
+        SET_OUTLINESIZE_ADDR = get_method_addr(TextCommon, c"set_OutlineSize", 1);
+        UPDATEOUTLINE_ADDR = get_method_addr(TextCommon, c"UpdateOutline", 0);
+        SET_OUTLINECOLOR_ADDR = get_method_addr(TextCommon, c"set_OutlineColor", 1);
+        REBUILDOUTLINE_ADDR = get_method_addr(TextCommon, c"RebuildOutline", 0);
     }
 }

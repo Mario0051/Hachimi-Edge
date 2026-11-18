@@ -1,16 +1,92 @@
 use std::sync::atomic::{self, AtomicBool};
-
-use crate::{core::{Hachimi, game::Region}, il2cpp::{symbols::get_method_addr, types::*}};
+use crate::{
+    core::{Hachimi, game::Region},
+    il2cpp::{
+        symbols::{get_field_from_name, get_method_addr, SingletonLike},
+        types::*
+    }
+};
+use super::SceneDefine::{ViewId, SceneId};
 
 static SPLASH_SHOWN: AtomicBool = AtomicBool::new(false);
 pub fn is_splash_shown() -> bool {
     SPLASH_SHOWN.load(atomic::Ordering::Acquire)
 }
 
+static HOME_INIT: AtomicBool = AtomicBool::new(false);
+pub fn is_home_init() -> bool {
+    HOME_INIT.load(atomic::Ordering::Acquire)
+}
+
+static mut CLASS: *mut Il2CppClass = 0 as _;
+pub fn class() -> *mut Il2CppClass {
+    unsafe { CLASS }
+}
+
+pub fn instance() -> *mut Il2CppObject {
+    let Some(singleton) = SingletonLike::new(class()) else {
+        return 0 as _;
+    };
+    singleton.instance()
+}
+
+def_field_object_accessors!(get_PhotoCheckObject, set_PhotoCheckObject, PHOTOCHECKOBJECT_FIELD, *mut Il2CppObject);
+def_field_object_accessors!(get_PhotoLibraryObject, set_PhotoLibraryObject, PHOTOLIBRARYOBJECT_FIELD, *mut Il2CppObject);
+
+static mut GETCURRENTVIEWID_ADDR: usize = 0;
+impl_addr_wrapper_fn!(GetCurrentViewId, GETCURRENTVIEWID_ADDR, i32, this: *mut Il2CppObject);
+
+static mut GETCURRENTSCENEID_ADDR: usize = 0;
+impl_addr_wrapper_fn!(GetCurrentSceneId, GETCURRENTSCENEID_ADDR, SceneId, this: *mut Il2CppObject);
+
+static SCENE_ID_CACHE: atomic::AtomicI32 = atomic::AtomicI32::new(0);
+
+type AlterUpdateFn = extern "C" fn(this: *mut Il2CppObject);
+extern "C" fn AlterUpdate(this: *mut Il2CppObject) {
+    get_orig_fn!(AlterUpdate, AlterUpdateFn)(this);
+    SCENE_ID_CACHE.store(GetCurrentSceneId(this) as i32, atomic::Ordering::Release);
+}
+
+pub fn current_scene_id() -> SceneId {
+    unsafe { std::mem::transmute(SCENE_ID_CACHE.load(atomic::Ordering::Acquire)) }
+}
+
+pub fn is_race_scene_family() -> bool {
+    let id = current_scene_id();
+    matches!(
+        id,
+        SceneId::Race
+        | SceneId::DailyRace
+        | SceneId::LegendRace
+        | SceneId::TeamStadium
+        | SceneId::Champions
+        | SceneId::ChallengeMatch
+        | SceneId::RoomMatch
+        | SceneId::PracticeRace
+        | SceneId::TrainingChallenge
+        | SceneId::Heroes
+        | SceneId::UltimateRace
+    )
+}
+
+static mut GETCURRENTVIEWCONTROLLER_ADDR: usize = 0;
+impl_addr_wrapper_fn!(GetCurrentViewController, GETCURRENTVIEWCONTROLLER_ADDR, *mut Il2CppObject, this: *mut Il2CppObject);
+
 fn ChangeViewCommon(next_view_id: i32) {
-    if next_view_id == 1 { // ViewId.Splash
+    if next_view_id == ViewId::Splash {
         SPLASH_SHOWN.store(true, atomic::Ordering::Release);
+        debug!("SPLASH_SHOWN: {}", SPLASH_SHOWN.load(atomic::Ordering::Acquire));
     }
+    if next_view_id == ViewId::Home && !HOME_INIT.swap(true, atomic::Ordering::AcqRel) {
+        #[cfg(target_os = "windows")]
+        {
+            use crate::windows::{smtc, wnd_hook::get_target_hwnd};
+            if Hachimi::instance().config.load().windows.enable_smtc {
+                smtc::init(get_target_hwnd());
+            }
+        }
+    }
+    debug!("next_view_id = {}", next_view_id);
 }
 
 type ChangeViewJpfn = extern "C" fn(
@@ -51,6 +127,29 @@ extern "C" fn ChangeViewOther(
 pub fn init(umamusume: *const Il2CppImage) {
     get_class_or_return!(umamusume, Gallop, SceneManager);
 
+    unsafe {
+        CLASS = SceneManager;
+        GETCURRENTVIEWID_ADDR = get_method_addr(SceneManager, c"GetCurrentViewId", 0);
+        GETCURRENTSCENEID_ADDR = get_method_addr(SceneManager, c"GetCurrentSceneId", 0);
+        PHOTOCHECKOBJECT_FIELD = get_field_from_name(SceneManager, c"PhotoCheckObject");
+        PHOTOLIBRARYOBJECT_FIELD = get_field_from_name(SceneManager, c"PhotoLibraryObject");
+
+        let mut iter: *mut std::ffi::c_void = std::ptr::null_mut();
+        loop {
+            let method = crate::il2cpp::api::il2cpp_class_get_methods(SceneManager, &mut iter);
+            if method.is_null() { break; }
+            let name = std::ffi::CStr::from_ptr((*method).name).to_string_lossy();
+            if name == "GetCurrentViewController" && (*method).is_generic() == 0 {
+                GETCURRENTVIEWCONTROLLER_ADDR = (*method).methodPointer;
+                break;
+            }
+        }
+
+        if GETCURRENTVIEWCONTROLLER_ADDR == 0 {
+            error!("Failed to find non-generic GetCurrentViewController on SceneManager");
+        }
+    }
+
     if Hachimi::instance().game.region == Region::Japan {
         let ChangeView_addr = get_method_addr(SceneManager, c"ChangeView", 7);
         new_hook!(ChangeView_addr, ChangeViewJp);
@@ -59,4 +158,7 @@ pub fn init(umamusume: *const Il2CppImage) {
         let ChangeView_addr = get_method_addr(SceneManager, c"ChangeView", 5);
         new_hook!(ChangeView_addr, ChangeViewOther);
     }
+
+    let AlterUpdate_addr = get_method_addr(SceneManager, c"AlterUpdate", 0);
+    new_hook!(AlterUpdate_addr, AlterUpdate);
 }

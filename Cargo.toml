@@ -1,7 +1,6 @@
 [package]
 name = "hachimi"
-version = "0.24.0"
-rust-version = "1.91.1"
+version = "0.33.1"
 edition = "2021"
 
 [lib]
@@ -16,6 +15,10 @@ codegen-units = 1
 
 [profile.dev]
 debug = "limited"
+
+[lints.clippy]
+all = "allow"
+perf = { level = "deny", priority = 1 }
 
 [dependencies]
 log = "0.4"
@@ -36,21 +39,22 @@ sqlparser = "0.43"
 textwrap = "0.16"
 atomic_float = "0.1"
 blake3 = "1.5"
-ureq = { version = "3.2.0", features = ["json"] }
+ureq = { version = "3.2.0", features = ["json", "brotli"] }
 http = "1.4.0"
 size = "0.4"
 memmap2 = "0.9.9"
 thread-priority = "3.0.0"
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 unicode-width = "0.1"
 tiny_http = "0.12"
 rust-i18n = "3.1"
 sys-locale = "0.3.2"
 simplelog = "0.12.2"
-mach2 = "0.6.0"
+crossbeam-channel = "0.5"
+egui_commonmark = { version = "0.22", features = ["better_syntax_highlighting"] }
+libc = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
-libc = "0.2"
 android_logger = "0.15.1"
 procfs = "0.16"
 jni = "0.21.1"
@@ -64,6 +68,7 @@ dobby-rs = "0.1"
 egui-wgpu = "0.33"
 objc2 = "0.5"
 ctor = "0.2"
+mach2 = "0.6.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windebug_logger = "0.1"
@@ -71,6 +76,8 @@ minhook = "0.5"
 egui-directx11 = "0.12.1"
 discord-rich-presence = "1.0.0"
 pelite = "0.10"
+microseh = "1.1"
+webview2-com = "0.39.1"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.62.2"
@@ -85,11 +92,22 @@ features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_Ime",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_Graphics_Dxgi",
     "Win32_Storage_FileSystem",
-    "Win32_Graphics_Gdi"
+    "Win32_Graphics_Gdi",
+    "Media",
+    "Foundation",
+    "Storage_Streams",
+    "Win32_System_WinRT",
+    "Win32_System_Com",
+    "Data_Xml_Dom",
+    "UI_Notifications"
 ]
 
 [build-dependencies]
@@ -97,7 +115,7 @@ tauri-winres = "0.1"
 cc = "1.1"
 
 [package.metadata.tauri-winres]
-ProductName = "Hachimi"
+ProductName = "Hachimi Edge"
 FileDescription = "Game enhancement and translation mod"
 
 [patch.crates-io]

@@ -1,9 +1,11 @@
-use std::{sync::{Arc, Mutex}};
+use std::{sync::{Arc, Mutex}, time::Duration};
 
 use rust_i18n::t;
 use serde::Deserialize;
 
-use crate::core::{gui::SimpleYesNoDialog, hachimi::{REPO_PATH, CODEBERG_API, GITHUB_API}, http, Error, Gui, Hachimi};
+use crate::core::{gui::{HachimiUpdateWindow, NotificationGuard}, hachimi::{REPO_PATH, CODEBERG_API, GITHUB_API}, http, Error, Gui, Hachimi};
+
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 pub struct Updater {
@@ -28,19 +30,29 @@ impl Updater {
             return Ok(false);
         };
 
-        if let Some(mutex) = Gui::instance() {
-            mutex.lock().unwrap().show_notification(&t!("notification.checking_for_updates"));
-        }
+        let checking_notif_id = if let Some(mutex) = Gui::instance() {
+            Some(mutex.lock().unwrap().show_persistent_notification(&t!("notification.checking_for_updates")))
+        } else {
+            None
+        };
+        let _guard = checking_notif_id.map(NotificationGuard);
 
-        let latest = match http::get_json::<Release>(&format!("{}/{}/releases/latest", GITHUB_API, REPO_PATH)) {
+        let latest = match http::get_json_with_timeout::<Release>(
+            &format!("{}/{}/releases/latest", GITHUB_API, REPO_PATH), UPDATE_CHECK_TIMEOUT
+        ) {
             Ok(res) => res,
             Err(e) => {
                 warn!("GitHub update check failed, trying Codeberg: {}", e);
-                http::get_json::<Release>(&format!("{}/{}/releases/latest", CODEBERG_API, REPO_PATH))?
+                if let Some(mutex) = Gui::instance() {
+                    mutex.lock().unwrap().show_notification(&t!("notification.github_update_unreachable"));
+                }
+                http::get_json_with_timeout::<Release>(
+                    &format!("{}/{}/releases/latest", CODEBERG_API, REPO_PATH), UPDATE_CHECK_TIMEOUT
+                )?
             }
         };
 
-        if latest.is_different_version() {
+        if latest.is_newer_version() {
             #[cfg(target_os = "windows")]
             {
                 let installer_asset = latest.assets.iter().find(|asset| asset.name == "hachimi_installer.exe");
@@ -53,7 +65,7 @@ impl Updater {
                     self.new_update.store(Arc::new(Some(asset)));
     
                     if let Some(mutex) = Gui::instance() {
-                        mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
+                        mutex.lock().unwrap().show_window(Box::new(HachimiUpdateWindow::new(
                             &t!("update_prompt_dialog.title"),
                             &t!("update_prompt_dialog.content", version = latest.tag_name),
                             |ok| {
@@ -68,7 +80,7 @@ impl Updater {
             #[cfg(target_os = "android")]
             {
                 if let Some(mutex) = Gui::instance() {
-                    mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
+                    mutex.lock().unwrap().show_window(Box::new(HachimiUpdateWindow::new(
                         &t!("update_prompt_dialog.title"),
                         &t!("update_prompt_dialog.android_content", version = latest.tag_name),
                         |ok| {
@@ -110,12 +122,11 @@ impl Updater {
         }
         #[cfg(target_os = "android")]
         {
-            use crate::{android::utils, core::hachimi::{UMAPATCHER_INSTALL_URL, UMAPATCHER_PACKAGE_NAME}};
-            utils::open_app_or_fallback(
-                UMAPATCHER_PACKAGE_NAME,
-                &format!("{}.MainActivity", UMAPATCHER_PACKAGE_NAME.replace(".edge", "")),
-                UMAPATCHER_INSTALL_URL
-            );
+            use crate::{
+                core::hachimi::UMAPATCHER_UPDATER_DEEPLINK,
+                il2cpp::{ext::StringExt, hook::UnityEngine_CoreModule::Application}
+            };
+            Application::OpenURL(UMAPATCHER_UPDATER_DEEPLINK.to_il2cpp_string());
         }
     }
 
@@ -126,11 +137,11 @@ impl Updater {
         };
         self.new_update.store(Arc::new(None));
 
-        use crate::windows::{main::DLL_HMODULE, utils};
+        use crate::windows::{main::DLL_HMODULE, utils::{self, get_module_file_name}};
         use windows::{
             core::{HSTRING, PCWSTR},
             Win32::{
-                Foundation::{MAX_PATH, WPARAM, LPARAM}, System::LibraryLoader::GetModuleFileNameW,
+                Foundation::{WPARAM, LPARAM},
                 UI::{Shell::ShellExecuteW, WindowsAndMessaging::{PostMessageW, SW_NORMAL, WM_CLOSE}}
             }
         };
@@ -161,9 +172,7 @@ impl Updater {
         }
 
         // Launch the installer
-        let mut slice = [0u16; MAX_PATH as usize];
-        let length = unsafe { GetModuleFileNameW(Some(DLL_HMODULE), &mut slice) } as usize;
-        let hachimi_path_str = unsafe { widestring::Utf16Str::from_slice_unchecked(&slice[..length]) };
+        let hachimi_path_str = unsafe { get_module_file_name(DLL_HMODULE) };
         let game_dir = utils::get_game_dir();
         unsafe {
             ShellExecuteW(
@@ -174,7 +183,7 @@ impl Updater {
                     "install --install-dir \"{}\" --target \"{}\" --sleep 1000 --prompt-for-game-exit --launch-game -- {}",
                     game_dir.display(), hachimi_path_str, std::env::args().skip(1).collect::<Vec<String>>().join(" ")
                 )),
-                PCWSTR::from_raw(slice.as_ptr()),
+                PCWSTR::from_raw(hachimi_path_str.as_ptr()),
                 SW_NORMAL
             );
 
@@ -186,17 +195,48 @@ impl Updater {
     }
 }
 
+struct Version(u32, u32, u32);
+
+impl Version {
+    pub fn try_parse(version: &str) -> Option<Version> {
+        let slice = version.strip_prefix('v').unwrap_or(version);
+
+        let mut parts = slice.split('.');
+        let major = parts.next()?.parse::<u32>().ok()?;
+        let minor = parts.next()?.parse::<u32>().ok()?;
+        let patch = parts.next()?.parse::<u32>().ok()?;
+
+        if parts.next().is_none() {
+            Some(Version(major, minor, patch))
+        } else {
+            None
+        }
+    }
+
+    pub fn to_int(&self) -> u32 {
+        (self.0 << 16) | (self.1 << 8) | self.2
+    }
+}
+
 #[derive(Deserialize)]
 pub struct Release {
     // STUB
-    tag_name: String,
+    pub tag_name: String,
     #[cfg(target_os = "windows")]
     assets: Vec<ReleaseAsset>
 }
 
 impl Release {
-    pub fn is_different_version(&self) -> bool {
-        self.tag_name != format!("v{}", env!("CARGO_PKG_VERSION"))
+    pub fn is_newer_version(&self) -> bool {
+        let local = Version::try_parse(env!("CARGO_PKG_VERSION"));
+        let remote = Version::try_parse(&self.tag_name);
+
+        // fall back to naive checking if one of them can't be parsed
+        if local.is_none() || remote.is_none() {
+            self.tag_name != format!("v{}", env!("CARGO_PKG_VERSION"))
+        } else {
+            remote.unwrap().to_int() > local.unwrap().to_int()
+        }
     }
 }
 

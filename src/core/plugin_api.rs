@@ -1,18 +1,27 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::{ffi::{c_char, c_void, CStr, CString}, sync::atomic::AtomicI32};
 
 use once_cell::sync::OnceCell;
 use egui::Align;
 
-use crate::{core::{Hachimi, Interceptor, gui}, il2cpp::{self, types::{FieldInfo, Il2CppArray, Il2CppClass, Il2CppImage, Il2CppMethodPointer, Il2CppObject, Il2CppThread, Il2CppTypeEnum, MethodInfo, il2cpp_array_size_t}}};
+use crate::{core::{utils::get_data_path, Hachimi, Interceptor, gui}, il2cpp::{self, types::{FieldInfo, Il2CppArray, Il2CppClass, Il2CppImage, Il2CppMethodPointer, Il2CppObject, Il2CppString, Il2CppThread, Il2CppTypeEnum, MethodInfo, il2cpp_array_size_t}}};
 
-const VERSION: i32 = 2;
+const VERSION: i32 = 3;
 
 static PLUGIN_VTABLE: OnceCell<Vtable> = OnceCell::new();
+static DATA_DIR_CSTR: once_cell::sync::OnceCell<CString> = once_cell::sync::OnceCell::new();
+static DATA_PATH_CSTR: once_cell::sync::OnceCell<CString> = once_cell::sync::OnceCell::new();
 
+pub type HachimiGetApiFn = extern "C" fn(name: *const c_char) -> *mut c_void;
 pub type HachimiInitFn = extern "C" fn(vtable: *const Vtable, version: i32) -> InitResult;
+pub type HachimiInitV3Fn = extern "C" fn(get_api: HachimiGetApiFn, version: i32) -> InitResult;
 pub type GuiMenuCallback = extern "C" fn(userdata: *mut c_void);
 pub type GuiMenuSectionCallback = extern "C" fn(ui: *mut c_void, userdata: *mut c_void);
 pub type GuiUiCallback = extern "C" fn(ui: *mut c_void, userdata: *mut c_void);
+pub type GameInitializedCallback = unsafe extern "C" fn(userdata: *mut c_void);
+pub type PresentCallback = unsafe extern "C" fn(swapchain: *mut c_void, userdata: *mut c_void);
+pub type GuiWindowCallback = extern "C" fn(ui: *mut c_void, userdata: *mut c_void);
+
+static NEXT_PLUGIN_WINDOW_ID: AtomicI32 = AtomicI32::new(0);
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -184,6 +193,28 @@ unsafe extern "C" fn il2cpp_object_new(klass: *const Il2CppClass) -> *mut Il2Cpp
     return il2cpp::api::il2cpp_object_new(klass);
 }
 
+unsafe extern "C" fn il2cpp_runtime_object_init(object: *mut Il2CppObject) {
+    il2cpp::api::il2cpp_runtime_object_init(object);
+}
+
+unsafe extern "C" fn il2cpp_string_new(text: *const c_char) -> *mut Il2CppString {
+    il2cpp::api::il2cpp_string_new(text)
+}
+
+unsafe extern "C" fn il2cpp_string_chars(s: *mut Il2CppString) -> *mut u16 {
+    if s.is_null() {
+        return std::ptr::null_mut();
+    }
+    il2cpp::api::il2cpp_string_chars(s)
+}
+
+unsafe extern "C" fn il2cpp_string_length(s: *mut Il2CppString) -> i32 {
+    if s.is_null() {
+        return 0;
+    }
+    il2cpp::api::il2cpp_string_length(s)
+}
+
 unsafe extern "C" fn il2cpp_unbox(obj: *mut Il2CppObject) -> *mut c_void {
     il2cpp::api::il2cpp_object_unbox(obj)
 }
@@ -251,6 +282,41 @@ unsafe extern "C" fn gui_register_menu_section(
     };
     gui::register_plugin_menu_section(callback, userdata);
     true
+}
+
+unsafe extern "C" fn hachimi_register_on_game_initialized(
+    callback: Option<GameInitializedCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(callback) = callback else {
+        return false;
+    };
+    let hachimi = Hachimi::instance();
+    let mut callbacks = hachimi.plugin_init_callbacks.lock().unwrap();
+    callbacks.push((callback as usize, userdata as usize));
+    true
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "C" fn hachimi_register_present_callback(
+    callback: Option<PresentCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(callback) = callback else {
+        return false;
+    };
+    let hachimi = Hachimi::instance();
+    let mut callbacks = hachimi.present_callbacks.lock().unwrap();
+    callbacks.push((callback as usize, userdata as usize));
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+unsafe extern "C" fn hachimi_register_present_callback(
+    _callback: Option<PresentCallback>,
+    _userdata: *mut c_void
+) -> bool {
+    false
 }
 
 unsafe extern "C" fn gui_show_notification(message: *const c_char) -> bool {
@@ -327,6 +393,27 @@ unsafe extern "C" fn gui_ui_checkbox(
     changed
 }
 
+unsafe extern "C" fn gui_ui_slider_u32(
+    ui: *mut c_void,
+    text: *const c_char,
+    value: *mut u32,
+    minimum: u32,
+    maximum: u32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if value.is_null() || minimum > maximum { return false; }
+    let mut current = *value;
+    let changed = ui.add(
+        egui::Slider::new(&mut current, minimum..=maximum)
+            .text(cstr_or_empty(text))
+            .step_by(1.0),
+    ).changed();
+    if changed {
+        *value = current;
+    }
+    changed
+}
+
 unsafe extern "C" fn gui_ui_text_edit_singleline(
     ui: *mut c_void,
     buffer: *mut c_char,
@@ -366,6 +453,325 @@ unsafe extern "C" fn gui_ui_text_edit_singleline(
         bytes[..copy_len].copy_from_slice(&src[..copy_len]);
     }
 
+    changed
+}
+
+unsafe extern "C" fn gui_ui_slider_i32(
+    ui: *mut c_void,
+    text: *const c_char,
+    value: *mut i32,
+    minimum: i32,
+    maximum: i32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if value.is_null() || minimum > maximum { return false; }
+    let mut current = *value;
+    let changed = ui.add(
+        egui::Slider::new(&mut current, minimum..=maximum)
+            .text(cstr_or_empty(text))
+            .step_by(1.0),
+    ).changed();
+    if changed {
+        *value = current;
+    }
+    changed
+}
+
+unsafe extern "C" fn gui_ui_slider_f32(
+    ui: *mut c_void,
+    text: *const c_char,
+    value: *mut f32,
+    minimum: f32,
+    maximum: f32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if value.is_null() || !minimum.is_finite() || !maximum.is_finite() || minimum > maximum {
+        return false;
+    }
+    let mut current = *value;
+    if !current.is_finite() { return false; }
+    let changed = ui.add(
+        egui::Slider::new(&mut current, minimum..=maximum)
+            .text(cstr_or_empty(text)),
+    ).changed();
+    if changed {
+        *value = current;
+    }
+    changed
+}
+
+unsafe extern "C" fn gui_ui_drag_value_i32(
+    ui: *mut c_void,
+    value: *mut i32,
+    minimum: i32,
+    maximum: i32,
+    speed: f32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if value.is_null() || minimum > maximum || !speed.is_finite() || speed <= 0.0 {
+        return false;
+    }
+    let mut current = *value;
+    let response = ui.add(egui::DragValue::new(&mut current).range(minimum..=maximum).speed(speed));
+    #[cfg(target_os = "android")]
+    gui::handle_android_keyboard(&response, &mut current);
+    let changed = response.changed() || current != *value;
+    if changed {
+        *value = current.clamp(minimum, maximum);
+    }
+    changed
+}
+
+unsafe extern "C" fn gui_ui_drag_value_f32(
+    ui: *mut c_void,
+    value: *mut f32,
+    minimum: f32,
+    maximum: f32,
+    speed: f32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if value.is_null() || !minimum.is_finite() || !maximum.is_finite() || minimum > maximum
+        || !speed.is_finite() || speed <= 0.0
+    {
+        return false;
+    }
+    let mut current = *value;
+    if !current.is_finite() { return false; }
+    let response = ui.add(egui::DragValue::new(&mut current).range(minimum..=maximum).speed(speed));
+    #[cfg(target_os = "android")]
+    gui::handle_android_keyboard(&response, &mut current);
+    if !current.is_finite() { return false; }
+    let changed = response.changed() || current != *value;
+    if changed {
+        *value = current.clamp(minimum, maximum);
+    }
+    changed
+}
+
+unsafe extern "C" fn gui_ui_enabled(
+    ui: *mut c_void,
+    enabled: bool,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    ui.add_enabled_ui(enabled, |ui| {
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    true
+}
+
+unsafe extern "C" fn gui_ui_progress_bar(
+    ui: *mut c_void,
+    progress: f32,
+    width: f32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if !progress.is_finite() || !width.is_finite() || width < 0.0 { return false; }
+    let width = if width > 0.0 { width } else { ui.available_width() };
+    gui::progress_bar(ui, progress, width);
+    true
+}
+
+unsafe fn gui_image(
+    ui: &egui::Ui,
+    id: *const c_char,
+    bytes: *const u8,
+    bytes_len: usize,
+    width: f32,
+    height: f32
+) -> Option<egui::Image<'static>> {
+    if bytes.is_null() || bytes_len == 0 || !width.is_finite() || width <= 0.0
+        || !height.is_finite() || height <= 0.0
+    {
+        return None;
+    }
+    let id = ui.make_persistent_id(cstr_or_empty(id));
+    let uri = format!("bytes://plugin-image/{}.png", id.value());
+    let bytes = std::slice::from_raw_parts(bytes, bytes_len).to_vec();
+    Some(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(egui::vec2(width, height)))
+}
+
+unsafe extern "C" fn gui_ui_image(
+    ui: *mut c_void,
+    id: *const c_char,
+    bytes: *const u8,
+    bytes_len: usize,
+    width: f32,
+    height: f32
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(image) = gui_image(ui, id, bytes, bytes_len, width, height) else { return false; };
+    ui.add(image);
+    true
+}
+
+unsafe extern "C" fn gui_ui_scroll_area(
+    ui: *mut c_void,
+    id: *const c_char,
+    horizontal: bool,
+    vertical: bool,
+    max_width: f32,
+    max_height: f32,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    if (!horizontal && !vertical) || !max_width.is_finite() || max_width <= 0.0
+        || !max_height.is_finite() || max_height <= 0.0
+    {
+        return false;
+    }
+    egui::ScrollArea::new([horizontal, vertical])
+        .id_salt(cstr_or_empty(id))
+        .max_width(max_width)
+        .max_height(max_height)
+        .show(ui, |ui| {
+            callback(ui as *mut _ as *mut c_void, userdata);
+        });
+    true
+}
+
+unsafe extern "C" fn gui_ui_vertical(
+    ui: *mut c_void,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    ui.vertical(|ui| {
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    true
+}
+
+unsafe extern "C" fn gui_ui_horizontal_wrapped(
+    ui: *mut c_void,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    ui.horizontal_wrapped(|ui| {
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    true
+}
+
+unsafe extern "C" fn gui_ui_group(
+    ui: *mut c_void,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    ui.group(|ui| {
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    true
+}
+
+unsafe extern "C" fn gui_ui_add_space(ui: *mut c_void, amount: f32) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if !amount.is_finite() || amount < 0.0 { return false; }
+    ui.add_space(amount);
+    true
+}
+
+unsafe extern "C" fn gui_ui_with_layout(
+    ui: *mut c_void,
+    vertical: bool,
+    alignment: i32,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    let alignment = match alignment {
+        0 => Align::Min,
+        1 => Align::Center,
+        2 => Align::Max,
+        _ => return false,
+    };
+    let layout = if vertical {
+        egui::Layout::top_down(alignment)
+    }
+    else {
+        egui::Layout::left_to_right(alignment)
+    };
+    ui.with_layout(layout, |ui| {
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    true
+}
+
+unsafe extern "C" fn gui_ui_collapsing_header(
+    ui: *mut c_void,
+    id: *const c_char,
+    text: *const c_char,
+    default_open: bool,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    egui::CollapsingHeader::new(cstr_or_empty(text))
+        .id_salt(cstr_or_empty(id))
+        .default_open(default_open)
+        .show(ui, |ui| {
+            callback(ui as *mut _ as *mut c_void, userdata);
+        });
+    true
+}
+
+unsafe extern "C" fn gui_ui_tabs(
+    ui: *mut c_void,
+    id: *const c_char,
+    selected_index: *mut i32,
+    items: *const *const c_char,
+    item_count: usize,
+    callback: Option<GuiUiCallback>,
+    userdata: *mut c_void
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    let Some(callback) = callback else { return false; };
+    if selected_index.is_null() || items.is_null() || item_count == 0 || item_count > i32::MAX as usize {
+        return false;
+    }
+    let labels = std::slice::from_raw_parts(items, item_count);
+    let original_index = *selected_index;
+    let mut current = original_index.clamp(0, item_count as i32 - 1);
+    ui.push_id(cstr_or_empty(id), |ui| {
+        gui::tab_bar(ui, "tabs_scroll", |ui| {
+            for (index, label) in labels.iter().enumerate() {
+                ui.push_id(index, |ui| {
+                    if ui.selectable_label(current == index as i32, cstr_or_empty(*label)).clicked() {
+                        current = index as i32;
+                    }
+                });
+            }
+        });
+        *selected_index = current;
+        callback(ui as *mut _ as *mut c_void, userdata);
+    });
+    current != original_index
+}
+
+unsafe extern "C" fn gui_ui_color_edit(
+    ui: *mut c_void,
+    text: *const c_char,
+    rgba: *mut u8
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if rgba.is_null() { return false; }
+    let bytes = std::slice::from_raw_parts_mut(rgba, 4);
+    let mut current = egui::Color32::from_rgba_unmultiplied(bytes[0], bytes[1], bytes[2], bytes[3]);
+    let changed = gui::theme_color_row(ui, cstr_or_empty(text), &mut current);
+    if changed {
+        bytes.copy_from_slice(&current.to_srgba_unmultiplied());
+    }
     changed
 }
 
@@ -420,6 +826,159 @@ unsafe extern "C" fn gui_ui_colored_label(
     let Some(ui) = ui_from_ptr(ui) else { return false; };
     ui.colored_label(egui::Color32::from_rgba_unmultiplied(r, g, b, a), cstr_or_empty(text));
     true
+}
+
+unsafe extern "C" fn gui_ui_combo_menu(
+    ui: *mut c_void,
+    id: *const c_char,
+    selected_index: *mut i32,
+    items: *const *const c_char,
+    item_count: usize,
+    search_term: *mut c_char,
+    search_term_len: usize,
+) -> bool {
+    let Some(ui) = ui_from_ptr(ui) else { return false; };
+    if selected_index.is_null() || items.is_null() || item_count == 0 {
+        return false;
+    }
+
+    let id_str = cstr_or_empty(id);
+    let button_id = ui.make_persistent_id(id_str);
+    let popup_id = button_id.with("popup");
+
+    let scale = gui::get_scale(ui.ctx());
+    let fixed_width = 145.0 * scale;
+    let row_height = 24.0 * scale;
+    let padding = ui.spacing().button_padding;
+
+    let current_idx = *selected_index as usize;
+    let selected_text = if current_idx < item_count {
+        let item_ptr = *items.add(current_idx);
+        if !item_ptr.is_null() {
+            CStr::from_ptr(item_ptr).to_str().unwrap_or("Unknown")
+        } else {
+            "Unknown"
+        }
+    } else {
+        "Unknown"
+    };
+
+    let icon_size = 12.0 * scale;
+    let wrap_width = (fixed_width - padding.x * 2.0 - icon_size - 4.0 * scale).max(16.0 * scale);
+    let galley = ui.painter().layout(
+        selected_text.to_owned(),
+        egui::TextStyle::Button.resolve(ui.style()),
+        egui::Color32::PLACEHOLDER,
+        wrap_width
+    );
+
+    let height = row_height.max(galley.size().y + padding.y * 2.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(fixed_width, height), egui::Sense::hover());
+    let button_res = ui.interact(rect, button_id, egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let is_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+        let visuals = if is_open {
+            &ui.visuals().widgets.open
+        } else {
+            ui.style().interact(&button_res)
+        };
+
+        ui.painter().rect(
+            rect.expand(visuals.expansion),
+            visuals.corner_radius,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::epaint::StrokeKind::Inside
+        );
+
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - padding.x - icon_size / 2.0, rect.center().y),
+            egui::vec2(icon_size, icon_size)
+        );
+        gui::Gui::down_triangle_icon(ui.painter(), icon_rect, visuals);
+
+        let text_pos = egui::pos2(
+            rect.left() + padding.x,
+            rect.center().y - galley.size().y / 2.0
+        );
+        ui.painter().galley(text_pos, galley, visuals.text_color());
+    }
+
+    let mut changed = false;
+    let mut search = String::new();
+    if !search_term.is_null() && search_term_len > 0 {
+        let bytes = std::slice::from_raw_parts(search_term as *const u8, search_term_len);
+        if let Some(end) = bytes.iter().position(|b| *b == 0) {
+            search = String::from_utf8_lossy(&bytes[..end]).into_owned();
+        }
+    }
+
+    egui::Popup::menu(&button_res)
+    .id(popup_id)
+    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+    .show(|ui| {
+        ui.set_width(fixed_width);
+        ui.set_max_width(fixed_width);
+
+        ui.horizontal(|ui| {
+            let res = ui.add_sized(
+                [ui.available_width() - 30.0 * scale, row_height],
+                egui::TextEdit::singleline(&mut search).hint_text("Search...")
+            );
+            #[cfg(target_os = "android")]
+            gui::handle_android_keyboard(&res, &mut search);
+
+            if ui.button("X").clicked() {
+                search.clear();
+                res.surrender_focus();
+            }
+        });
+
+        ui.separator();
+
+        egui::ScrollArea::vertical()
+        .max_height(250.0 * scale)
+        .hscroll(false)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                for i in 0..item_count {
+                    let item_ptr = *items.add(i);
+                    if item_ptr.is_null() { continue; }
+                    let label = CStr::from_ptr(item_ptr).to_str().unwrap_or("");
+                    if !search.is_empty() && !label.to_lowercase().contains(&search.to_lowercase()) {
+                        continue;
+                    }
+
+                    let is_selected = current_idx == i;
+                    if ui.add(egui::Button::selectable(is_selected, label)).clicked() {
+                        *selected_index = i as i32;
+                        changed = true;
+                        egui::Popup::close_id(ui.ctx(), popup_id);
+                        search.clear();
+                    }
+                }
+            });
+        });
+    });
+
+    if !search_term.is_null() && search_term_len > 0 {
+        let bytes = std::slice::from_raw_parts_mut(search_term as *mut u8, search_term_len);
+        let search_bytes = search.as_bytes();
+        let len = search_bytes.len().min(search_term_len.saturating_sub(1));
+        bytes[..len].copy_from_slice(&search_bytes[..len]);
+        if len < search_term_len {
+            bytes[len] = 0;
+        }
+        if len + 1 < search_term_len {
+            bytes[len + 1..].fill(0);
+        }
+    }
+
+    changed
 }
 
 unsafe extern "C" fn gui_register_menu_item_icon(
@@ -483,6 +1042,33 @@ unsafe extern "C" fn gui_register_menu_section_with_icon(
     )
 }
 
+unsafe extern "C" fn gui_new_window_id() -> i32 {
+    NEXT_PLUGIN_WINDOW_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+unsafe extern "C" fn gui_show_window(
+    id: i32,
+    title: *const c_char,
+    contents_callback: Option<GuiWindowCallback>,
+    bottom_callback: Option<GuiWindowCallback>,
+    userdata: *mut c_void
+) -> bool {
+    if title.is_null() { return false; }
+    let Ok(title_str) = CStr::from_ptr(title).to_str() else { return false; };
+
+    gui::show_plugin_window(
+        id,
+        title_str.to_owned(),
+        contents_callback,
+        bottom_callback,
+        userdata as usize,
+    );
+    true
+}
+
+unsafe extern "C" fn gui_close_window(id: i32) {
+    gui::close_plugin_window(id);
+}
 
 #[cfg(target_os = "android")]
 unsafe extern "C" fn android_dex_load(dex_ptr: *const u8, dex_len: usize, class_name: *const c_char) -> u64 {
@@ -527,6 +1113,30 @@ unsafe extern "C" fn android_dex_call_static_string(handle: u64, method: *const 
 #[cfg(not(target_os = "android"))]
 unsafe extern "C" fn android_dex_call_static_string(_handle: u64, _method: *const c_char, _sig: *const c_char, _arg: *const c_char) -> bool {
     false
+}
+
+unsafe extern "C" fn gui_get_menu_width() -> f32 {
+    gui::get_menu_width()
+}
+
+unsafe extern "C" fn gui_set_menu_width(width: f32) {
+    gui::set_menu_width(width);
+}
+
+unsafe extern "C" fn hachimi_get_base_dir() -> *const c_char {
+    let s = DATA_DIR_CSTR.get_or_init(|| {
+        let path = &Hachimi::instance().game.data_dir;
+        CString::new(path.to_string_lossy().into_owned()).unwrap()
+    });
+    s.as_ptr()
+}
+
+unsafe extern "C" fn hachimi_get_data_path() -> *const c_char {
+    let s = DATA_PATH_CSTR.get_or_init(|| {
+        let path = get_data_path();
+        CString::new(path).unwrap()
+    });
+    s.as_ptr()
 }
 
 #[repr(C)]
@@ -659,12 +1269,47 @@ pub struct Vtable {
         callback: Option<GuiMenuSectionCallback>,
         userdata: *mut c_void
     ) -> bool,
+    // Window management (version >= 3)
+    pub gui_new_window_id: unsafe extern "C" fn() -> i32,
+    pub gui_show_window: unsafe extern "C" fn(
+        id: i32,
+        title: *const c_char,
+        contents_callback: Option<GuiWindowCallback>,
+        bottom_callback: Option<GuiWindowCallback>,
+        userdata: *mut c_void
+    ) -> bool,
+    pub gui_close_window: unsafe extern "C" fn(id: i32),
 
-    // Generic DEX/JNI helpers (version >= 2)
     pub android_dex_load: unsafe extern "C" fn(dex_ptr: *const u8, dex_len: usize, class_name: *const c_char) -> u64,
     pub android_dex_unload: unsafe extern "C" fn(handle: u64) -> bool,
     pub android_dex_call_static_noargs: unsafe extern "C" fn(handle: u64, method: *const c_char, sig: *const c_char) -> bool,
     pub android_dex_call_static_string: unsafe extern "C" fn(handle: u64, method: *const c_char, sig: *const c_char, arg: *const c_char) -> bool,
+
+    pub il2cpp_runtime_object_init: unsafe extern "C" fn(object: *mut Il2CppObject),
+    pub il2cpp_string_new: unsafe extern "C" fn(text: *const c_char) -> *mut Il2CppString,
+    pub il2cpp_string_chars: unsafe extern "C" fn(s: *mut Il2CppString) -> *mut u16,
+    pub il2cpp_string_length: unsafe extern "C" fn(s: *mut Il2CppString) -> i32,
+    pub gui_ui_combo_menu: unsafe extern "C" fn(
+        ui: *mut c_void,
+        id: *const c_char,
+        selected_index: *mut i32,
+        items: *const *const c_char,
+        item_count: usize,
+        search_term: *mut c_char,
+        search_term_len: usize,
+    ) -> bool,
+    pub hachimi_register_on_game_initialized: unsafe extern "C" fn(
+        callback: Option<GameInitializedCallback>,
+        userdata: *mut c_void,
+    ) -> bool,
+    pub hachimi_register_present_callback: unsafe extern "C" fn(
+        callback: Option<PresentCallback>,
+        userdata: *mut c_void,
+    ) -> bool,
+    pub gui_get_menu_width: unsafe extern "C" fn() -> f32,
+    pub gui_set_menu_width: unsafe extern "C" fn(width: f32),
+    pub hachimi_get_base_dir: unsafe extern "C" fn() -> *const c_char,
+    pub hachimi_get_data_path: unsafe extern "C" fn() -> *const c_char,
 }
 
 impl Vtable {
@@ -717,10 +1362,24 @@ impl Vtable {
         gui_ui_colored_label,
         gui_register_menu_item_icon,
         gui_register_menu_section_with_icon,
+        gui_new_window_id,
+        gui_show_window,
+        gui_close_window,
         android_dex_load,
         android_dex_unload,
         android_dex_call_static_noargs,
         android_dex_call_static_string,
+        il2cpp_runtime_object_init,
+        il2cpp_string_new,
+        il2cpp_string_chars,
+        il2cpp_string_length,
+        gui_ui_combo_menu,
+        hachimi_register_on_game_initialized,
+        hachimi_register_present_callback,
+        gui_get_menu_width,
+        gui_set_menu_width,
+        hachimi_get_base_dir,
+        hachimi_get_data_path,
     };
 
     pub fn instantiate() -> Self {
@@ -728,14 +1387,122 @@ impl Vtable {
     }
 }
 
+pub extern "C" fn hachimi_get_api(name: *const c_char) -> *mut c_void {
+    if name.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Ok(func_name) = (unsafe { CStr::from_ptr(name).to_str() }) else {
+        return std::ptr::null_mut();
+    };
+
+    match func_name {
+        "hachimi_instance" => hachimi_instance as *mut c_void,
+        "hachimi_get_interceptor" => hachimi_get_interceptor as *mut c_void,
+        "interceptor_hook" => interceptor_hook as *mut c_void,
+        "interceptor_hook_vtable" => interceptor_hook_vtable as *mut c_void,
+        "interceptor_get_trampoline_addr" => interceptor_get_trampoline_addr as *mut c_void,
+        "interceptor_unhook" => interceptor_unhook as *mut c_void,
+        "il2cpp_resolve_symbol" => il2cpp_resolve_symbol as *mut c_void,
+        "il2cpp_get_assembly_image" => il2cpp_get_assembly_image as *mut c_void,
+        "il2cpp_get_class" => il2cpp_get_class as *mut c_void,
+        "il2cpp_get_method" => il2cpp_get_method as *mut c_void,
+        "il2cpp_get_method_overload" => il2cpp_get_method_overload as *mut c_void,
+        "il2cpp_get_method_addr" => il2cpp_get_method_addr as *mut c_void,
+        "il2cpp_get_method_overload_addr" => il2cpp_get_method_overload_addr as *mut c_void,
+        "il2cpp_get_method_cached" => il2cpp_get_method_cached as *mut c_void,
+        "il2cpp_get_method_addr_cached" => il2cpp_get_method_addr_cached as *mut c_void,
+        "il2cpp_find_nested_class" => il2cpp_find_nested_class as *mut c_void,
+        "il2cpp_resolve_icall" => il2cpp_resolve_icall as *mut c_void,
+        "il2cpp_class_get_methods" => il2cpp_class_get_methods as *mut c_void,
+        "il2cpp_get_field_from_name" => il2cpp_get_field_from_name as *mut c_void,
+        "il2cpp_get_field_value" => il2cpp_get_field_value as *mut c_void,
+        "il2cpp_set_field_value" => il2cpp_set_field_value as *mut c_void,
+        "il2cpp_get_static_field_value" => il2cpp_get_static_field_value as *mut c_void,
+        "il2cpp_set_static_field_value" => il2cpp_set_static_field_value as *mut c_void,
+        "il2cpp_object_new" => il2cpp_object_new as *mut c_void,
+        "il2cpp_unbox" => il2cpp_unbox as *mut c_void,
+        "il2cpp_get_main_thread" => il2cpp_get_main_thread as *mut c_void,
+        "il2cpp_get_attached_threads" => il2cpp_get_attached_threads as *mut c_void,
+        "il2cpp_schedule_on_thread" => il2cpp_schedule_on_thread as *mut c_void,
+        "il2cpp_create_array" => il2cpp_create_array as *mut c_void,
+        "il2cpp_get_singleton_like_instance" => il2cpp_get_singleton_like_instance as *mut c_void,
+        "log" => log as *mut c_void,
+        "gui_register_menu_item" => gui_register_menu_item as *mut c_void,
+        "gui_register_menu_section" => gui_register_menu_section as *mut c_void,
+        "gui_show_notification" => gui_show_notification as *mut c_void,
+        "gui_ui_heading" => gui_ui_heading as *mut c_void,
+        "gui_ui_label" => gui_ui_label as *mut c_void,
+        "gui_ui_small" => gui_ui_small as *mut c_void,
+        "gui_ui_separator" => gui_ui_separator as *mut c_void,
+        "gui_ui_button" => gui_ui_button as *mut c_void,
+        "gui_ui_small_button" => gui_ui_small_button as *mut c_void,
+        "gui_ui_checkbox" => gui_ui_checkbox as *mut c_void,
+        "gui_ui_slider_u32" => gui_ui_slider_u32 as *mut c_void,
+        "gui_ui_slider_i32" => gui_ui_slider_i32 as *mut c_void,
+        "gui_ui_slider_f32" => gui_ui_slider_f32 as *mut c_void,
+        "gui_ui_drag_value_i32" => gui_ui_drag_value_i32 as *mut c_void,
+        "gui_ui_drag_value_f32" => gui_ui_drag_value_f32 as *mut c_void,
+        "gui_ui_enabled" => gui_ui_enabled as *mut c_void,
+        "gui_ui_progress_bar" => gui_ui_progress_bar as *mut c_void,
+        "gui_ui_image" => gui_ui_image as *mut c_void,
+        "gui_ui_scroll_area" => gui_ui_scroll_area as *mut c_void,
+        "gui_ui_vertical" => gui_ui_vertical as *mut c_void,
+        "gui_ui_horizontal_wrapped" => gui_ui_horizontal_wrapped as *mut c_void,
+        "gui_ui_group" => gui_ui_group as *mut c_void,
+        "gui_ui_add_space" => gui_ui_add_space as *mut c_void,
+        "gui_ui_with_layout" => gui_ui_with_layout as *mut c_void,
+        "gui_ui_collapsing_header" => gui_ui_collapsing_header as *mut c_void,
+        "gui_ui_tabs" => gui_ui_tabs as *mut c_void,
+        "gui_ui_color_edit" => gui_ui_color_edit as *mut c_void,
+        "gui_ui_text_edit_singleline" => gui_ui_text_edit_singleline as *mut c_void,
+        "gui_ui_horizontal" => gui_ui_horizontal as *mut c_void,
+        "gui_ui_grid" => gui_ui_grid as *mut c_void,
+        "gui_ui_end_row" => gui_ui_end_row as *mut c_void,
+        "gui_ui_colored_label" => gui_ui_colored_label as *mut c_void,
+        "gui_register_menu_item_icon" => gui_register_menu_item_icon as *mut c_void,
+        "gui_register_menu_section_with_icon" => gui_register_menu_section_with_icon as *mut c_void,
+        "gui_new_window_id" => gui_new_window_id as *mut c_void,
+        "gui_show_window" => gui_show_window as *mut c_void,
+        "gui_close_window" => gui_close_window as *mut c_void,
+        "android_dex_load" => android_dex_load as *mut c_void,
+        "android_dex_unload" => android_dex_unload as *mut c_void,
+        "android_dex_call_static_noargs" => android_dex_call_static_noargs as *mut c_void,
+        "android_dex_call_static_string" => android_dex_call_static_string as *mut c_void,
+        "il2cpp_runtime_object_init" => il2cpp_runtime_object_init as *mut c_void,
+        "il2cpp_string_new" => il2cpp_string_new as *mut c_void,
+        "il2cpp_string_chars" => il2cpp_string_chars as *mut c_void,
+        "il2cpp_string_length" => il2cpp_string_length as *mut c_void,
+        "gui_ui_combo_menu" => gui_ui_combo_menu as *mut c_void,
+        "hachimi_register_on_game_initialized" => hachimi_register_on_game_initialized as *mut c_void,
+        "hachimi_register_present_callback" => hachimi_register_present_callback as *mut c_void,
+        "gui_get_menu_width" => gui_get_menu_width as *mut c_void,
+        "gui_set_menu_width" => gui_set_menu_width as *mut c_void,
+        "hachimi_get_base_dir" => hachimi_get_base_dir as *mut c_void,
+        "hachimi_get_data_path" => hachimi_get_data_path as *mut c_void,
+        _ => std::ptr::null_mut(),
+    }
+}
+
+pub enum PluginInit {
+    V2(HachimiInitFn),
+    V3(HachimiInitV3Fn),
+}
+
 pub struct Plugin {
     pub name: String,
-    pub init_fn: HachimiInitFn
+    pub init_fn: PluginInit
 }
 
 impl Plugin {
     pub fn init(&self) -> InitResult {
-        let vtable = PLUGIN_VTABLE.get_or_init(Vtable::instantiate);
-        (self.init_fn)(vtable as *const Vtable, VERSION)
+        match &self.init_fn {
+            PluginInit::V2(init) => {
+                let vtable = PLUGIN_VTABLE.get_or_init(Vtable::instantiate);
+                init(vtable as *const Vtable, 2)
+            },
+            PluginInit::V3(init) => {
+                init(hachimi_get_api, VERSION)
+            }
+        }
     }
 }

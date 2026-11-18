@@ -7,14 +7,13 @@ pub mod StoryTimelineBlockData;
 pub mod StoryTimelineTrackData;
 pub mod StoryTimelineTextClipData;
 pub mod GallopUtil;
-mod UIManager;
+pub mod UIManager;
 pub mod GraphicSettings;
 mod CameraController;
 pub mod SingleModeStartResultCharaViewer;
 pub mod WebViewManager;
 pub mod DialogCommon;
 mod PartsSingleModeSkillLearningListItem;
-mod MasterMissionData;
 mod TrainingParamChangeA2U;
 pub mod WebViewDefine;
 pub mod TextFrame;
@@ -23,16 +22,30 @@ pub mod FlashActionPlayer;
 pub mod TextRubyData;
 pub mod TextDotData;
 pub mod GameSystem;
+pub mod StoryViewTextControllerBase;
 mod StoryViewTextControllerLandscape;
 mod StoryViewTextControllerSingleMode;
 mod JikkyoDisplay;
 pub mod Screen;
+#[cfg(target_os = "windows")]
+pub mod LandscapeUIManager;
+#[cfg(target_os = "windows")]
+pub mod StandaloneWindowResize;
+#[cfg(target_os = "windows")]
+mod GallopInput;
+#[cfg(target_os = "windows")]
+mod InputSystemManager;
+#[cfg(target_os = "windows")]
+mod BackKeyInputManager;
+#[cfg(target_os = "windows")]
+pub mod WindowsGamepadControl;
+pub mod TapEffectController;
 mod TrainingParamChangePlate;
 mod SingleModeUtils;
 mod MasterSingleModeTurn;
 mod TextFontManager;
 mod TextFormat;
-mod TextCommon;
+pub mod TextCommon;
 mod TextMeshProUguiCommon;
 mod StoryChoiceController;
 mod StoryViewController;
@@ -45,7 +58,9 @@ mod ButtonCommon;
 mod NowLoading;
 pub mod StoryTimelineController;
 mod DialogRaceOrientation;
-mod RaceInfo;
+pub mod RaceDefine;
+pub mod RaceInfo;
+pub mod RacePhaseCalculator;
 mod RaceUtil;
 mod SaveDataManager;
 mod ApplicationSettingSaveLoader;
@@ -56,23 +71,129 @@ mod LiveUtil;
 pub mod MasterDataUtil;
 pub mod DialogCommonBase;
 pub mod DialogObject;
+pub mod AudioManager;
+pub mod MasterCharacterSystemText;
 pub mod ImageCommon;
-pub mod TimeUtil;
+pub mod Notification;
+mod TimeUtil;
 pub mod CameraData;
+pub mod CascadeShadow;
+mod CascadeShadowForRace;
+pub mod GallopRenderer;
+pub mod StoryTimelineBg3DClipData;
 pub mod DialogManager;
-
-#[cfg(target_os = "windows")]
+pub mod PartsCharaMessageBase;
 pub mod SceneManager;
+mod LowResolutionCamera;
 
 #[cfg(target_os = "windows")]
 mod PaymentUtility;
-mod LowResolutionCamera;
+#[cfg(target_os = "windows")]
+mod LiveTimelineControl;
+#[cfg(target_os = "windows")]
+pub mod LiveTimelineWorkSheet;
+#[cfg(target_os = "windows")]
+pub mod LiveTimelineKeyPostFilmDataList;
+#[cfg(target_os = "windows")]
+pub mod LiveTimelineKeyCameraPositionData;
+#[cfg(target_os = "windows")]
+mod LiveTimelineKeyCameraLookAtData;
+#[cfg(target_os = "windows")]
+mod LiveTimelineKeyMultiCameraPositionData;
+#[cfg(target_os = "windows")]
+mod CharacterObject;
+#[cfg(target_os = "windows")]
+mod LiveModelController;
+#[cfg(target_os = "windows")]
+pub mod ModelController;
+#[cfg(target_os = "windows")]
+mod RaceCameraManager;
+#[cfg(target_os = "windows")]
+mod RaceCameraEventBase;
+#[cfg(target_os = "windows")]
+mod RaceModelController;
+#[cfg(target_os = "windows")]
+mod RaceViewBase;
+#[cfg(target_os = "windows")]
+mod RaceEffectManager;
+pub mod HorseData;
+pub mod HorseRaceInfo;
+pub mod JikkyoControllerBase;
+pub mod Jikkyo;
+pub mod RaceBGMController;
+pub mod RaceMainViewController;
+pub mod RaceManager;
+pub mod RaceManagerReplayBase;
+pub mod RaceEventPlayer;
+pub mod RaceHorseManagerBase;
+pub mod RaceSoundReplay;
+pub mod RaceUI;
+pub mod RaceUIMiniMap;
+pub mod RaceViewReplay;
+pub mod RaceSimulateData;
+pub mod RaceSimulateEventData;
+pub mod RaceSimulateReader;
+pub mod RaceHorseManagerReplay;
+pub mod RaceSimulateFrameData;
+pub mod RaceSimulateHorseFrameData;
+
+#[path = "SimulateEventType.rs"]
+mod simulate_event_type;
+pub use simulate_event_type::SimulateEventType;
+#[path = "TemptationMode.rs"]
+mod temptation_mode;
+pub use temptation_mode::TemptationMode;
+
+pub mod SkillManager;
+pub mod SkillBase;
+pub mod HorseRaceInfoReplay;
+#[cfg(target_os = "windows")]
+mod PartsScheduleBookAutoPlayScreen;
 pub mod TweenAnimationTimelineComponent;
 pub mod TweenAnimationTimelineData;
 pub mod TweenAnimationTimelineSheetData;
 mod PartsSingleModeChoiceRewardTextElementViewModel;
 mod PartsCommonHeaderTitle;
 pub mod StoryParamChangeEffect;
+mod PartsRaceAnalyzeRaceEventListItem;
+pub mod PartsNickNameRibbon;
+mod PartsNickNameListItem;
+mod PartsGetSkillPlate;
+mod StoryChoiceButton;
+mod DialogMissionListItem;
+mod PartsNamePlateBase;
+mod PartsSupportCardImproveDetail;
+#[cfg(target_os = "windows")]
+mod Connecting;
+#[cfg(target_os = "windows")]
+mod DownloadManager;
+#[cfg(target_os = "windows")]
+mod DownloadView;
+#[cfg(target_os = "windows")]
+mod DownloadErrorProcessor;
+#[cfg(target_os = "windows")]
+mod TitleViewController;
+#[cfg(target_os = "windows")]
+pub mod MainGameInitializer;
+pub mod Director;
+mod CySpringNative;
+pub mod LiveViewController;
+pub mod LiveTimeController;
+pub mod HomeViewController;
+pub mod WorkDataManager;
+pub mod AssetManager;
+pub mod WorkJukeboxData;
+pub mod JukeboxBgmSelector;
+pub mod JukeboxHomeTopUI;
+pub mod TempData;
+pub mod MasterJukeboxSetlistMusicData;
+pub mod HubViewControllerBase;
+mod LiveTheaterInfo;
+pub mod DownloadPathRegister;
+pub mod SceneDefine;
+pub mod GameDefine;
+pub mod MasterDataManager;
+pub mod MasterItemExchangeTop;
 
 pub fn init() {
     get_assembly_image_or_return!(image, "umamusume.dll");
@@ -85,6 +206,7 @@ pub fn init() {
     StoryTimelineBlockData::init(image);
     StoryTimelineTrackData::init(image);
     StoryTimelineTextClipData::init(image);
+    StoryTimelineBg3DClipData::init(image);
     GallopUtil::init(image);
     UIManager::init(image);
     GraphicSettings::init(image);
@@ -93,7 +215,6 @@ pub fn init() {
     WebViewManager::init(image);
     DialogCommon::init(image);
     PartsSingleModeSkillLearningListItem::init(image);
-    MasterMissionData::init(image);
     TrainingParamChangeA2U::init(image);
     TextFrame::init(image);
     PartsSingleModeSkillListItem::init(image);
@@ -101,6 +222,7 @@ pub fn init() {
     TextRubyData::init(image);
     TextDotData::init(image);
     GameSystem::init(image);
+    StoryViewTextControllerBase::init(image);
     StoryViewTextControllerLandscape::init(image);
     StoryViewTextControllerSingleMode::init(image);
     JikkyoDisplay::init(image);
@@ -124,6 +246,7 @@ pub fn init() {
     StoryTimelineController::init(image);
     DialogRaceOrientation::init(image);
     RaceInfo::init(image);
+    RacePhaseCalculator::init(image);
     RaceUtil::init(image);
     SaveDataManager::init(image);
     ApplicationSettingSaveLoader::init(image);
@@ -134,21 +257,104 @@ pub fn init() {
     MasterDataUtil::init(image);
     DialogCommonBase::init(image);
     DialogObject::init(image);
+    AudioManager::init(image);
+    MasterCharacterSystemText::init(image);
     ImageCommon::init(image);
+    Notification::init(image);
     TimeUtil::init(image);
     DialogManager::init(image);
+    PartsCharaMessageBase::init(image);
+    SceneManager::init(image);
+    LowResolutionCamera::init(image);
+    TapEffectController::init(image);
 
     #[cfg(target_os = "windows")]
     {
-        SceneManager::init(image);
+        LandscapeUIManager::init(image);
+        StandaloneWindowResize::init(image);
+        GallopInput::init(image);
+        InputSystemManager::init(image);
+        BackKeyInputManager::init(image);
+        WindowsGamepadControl::init(image);
         PaymentUtility::init(image);
+        Connecting::init(image);
+        DownloadManager::init(image);
+        DownloadView::init(image);
+        DownloadErrorProcessor::init(image);
+        MainGameInitializer::init(image);
+        LiveTimelineControl::init(image);
+        LiveTimelineWorkSheet::init(image);
+        LiveTimelineKeyPostFilmDataList::init(image);
+        LiveTimelineKeyCameraPositionData::init(image);
+        LiveTimelineKeyCameraLookAtData::init(image);
+        LiveTimelineKeyMultiCameraPositionData::init(image);
+        CharacterObject::init(image);
+        LiveModelController::init(image);
+        ModelController::init(image);
+        RaceCameraManager::init(image);
+        RaceCameraEventBase::init(image);
+        RaceModelController::init(image);
+        RaceViewBase::init(image);
+        RaceEffectManager::init(image);
+        TitleViewController::init(image);
+        PartsScheduleBookAutoPlayScreen::init(image);
     }
-    LowResolutionCamera::init(image);
+    HorseData::init(image);
+    HorseRaceInfo::init(image);
+    JikkyoControllerBase::init(image);
+    Jikkyo::init(image);
+    RaceBGMController::init(image);
+    RaceMainViewController::init(image);
+    RaceManager::init(image);
+    RaceManagerReplayBase::init(image);
+    RaceEventPlayer::init(image);
+    RaceSoundReplay::init(image);
+    RaceUI::init(image);
+    RaceUIMiniMap::init(image);
+    RaceViewReplay::init(image);
+    RaceHorseManagerBase::init(image);
+    RaceSimulateData::init(image);
+    RaceSimulateEventData::init(image);
+    RaceSimulateReader::init(image);
+    RaceHorseManagerReplay::init(image);
+    RaceSimulateFrameData::init(image);
+    RaceSimulateHorseFrameData::init(image);
+    HorseRaceInfoReplay::init(image);
+    SkillManager::init(image);
+    SkillBase::init(image);
     CameraData::init(image);
+    CascadeShadow::init(image);
+    CascadeShadowForRace::init(image);
+    GallopRenderer::init(image);
     TweenAnimationTimelineComponent::init(image);
     TweenAnimationTimelineData::init(image);
     TweenAnimationTimelineSheetData::init(image);
     PartsSingleModeChoiceRewardTextElementViewModel::init(image);
     PartsCommonHeaderTitle::init(image);
     StoryParamChangeEffect::init(image);
+    PartsRaceAnalyzeRaceEventListItem::init(image);
+    PartsNickNameRibbon::init(image);
+    PartsNickNameListItem::init(image);
+    PartsGetSkillPlate::init(image);
+    StoryChoiceButton::init(image);
+    DialogMissionListItem::init(image);
+    PartsNamePlateBase::init(image);
+    PartsSupportCardImproveDetail::init(image);
+    Director::init(image);
+    CySpringNative::init(image);
+    LiveViewController::init(image);
+    LiveTimeController::init(image);
+    HomeViewController::init(image);
+    WorkDataManager::init(image);
+    AssetManager::init(image);
+    WorkJukeboxData::init(image);
+    JukeboxBgmSelector::init(image);
+    JukeboxHomeTopUI::init(image);
+    TempData::init(image);
+    MasterJukeboxSetlistMusicData::init(image);
+    HubViewControllerBase::init(image);
+    LiveTheaterInfo::init(image);
+    DownloadPathRegister::init(image);
+    MasterDataManager::init(image);
+    MasterItemExchangeTop::init(image);
 }

@@ -3,3 +3,5 @@
 /.vscode
 /plugins
 result.log
+dump.cs
+.envrc

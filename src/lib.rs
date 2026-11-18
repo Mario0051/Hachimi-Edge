@@ -1,4 +1,4 @@
-#![allow(static_mut_refs, non_snake_case, non_camel_case_types)]
+#![allow(function_casts_as_integer, static_mut_refs, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate cstr;
@@ -27,4 +27,4 @@ use windows::{log_impl, game_impl, hachimi_impl, gui_impl, symbols_impl, interce
 mod ios;
 
 #[cfg(target_os = "ios")]
-use ios::{log_impl, game_impl, hachimi_impl, gui_impl, symbols_impl, interceptor_impl};
+use ios::{log_impl, game_impl, hachimi_impl, gui_impl, symbols_impl, interceptor_impl};

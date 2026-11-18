@@ -45,6 +45,13 @@ pub fn get_exec_path() -> PathBuf {
     PathBuf::from(exec_path_str)
 }
 
+pub fn get_module_file_name(hmodule: HMODULE) -> Utf16String {
+    let mut slice = [0u16; MAX_PATH as usize];
+    let length = unsafe { GetModuleFileNameW(Some(hmodule), &mut slice) } as usize;
+    let module_filename_str = unsafe { Utf16Str::from_slice_unchecked(&slice[..length]) }.to_owned();
+    module_filename_str
+}
+
 pub fn get_game_dir() -> PathBuf {
     let exec_path = get_exec_path();
     let parent = exec_path.parent().unwrap();
@@ -212,4 +219,49 @@ pub fn vk_to_display_label(vk: u16) -> String {
     }
 
     format!("VK 0x{:02X}", vk)
+}
+pub fn set_clipboard_text(text: &str) -> bool {
+    use windows::Win32::{
+        Foundation::HANDLE,
+        System::{
+            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Ole::CF_UNICODETEXT
+        }
+    };
+
+    let utf16 = match U16CString::from_str(text) {
+        Ok(s) => s,
+        Err(_) => return false
+    };
+    let words = utf16.as_slice_with_nul();
+
+    unsafe {
+        if !OpenClipboard(Some(HWND::default())).is_ok() {
+            return false;
+        }
+
+        let ok = (|| -> bool {
+            if EmptyClipboard().is_err() {
+                return false;
+            }
+
+            let Ok(hglobal) = GlobalAlloc(GMEM_MOVEABLE, words.len() * std::mem::size_of::<u16>()) else {
+                return false;
+            };
+
+            let ptr = GlobalLock(hglobal);
+            if ptr.is_null() {
+                return false;
+            }
+
+            std::ptr::copy_nonoverlapping(words.as_ptr(), ptr as *mut u16, words.len());
+            let _ = GlobalUnlock(hglobal);
+
+            SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(hglobal.0))).is_ok()
+        })();
+
+        let _ = CloseClipboard();
+        ok
+    }
 }

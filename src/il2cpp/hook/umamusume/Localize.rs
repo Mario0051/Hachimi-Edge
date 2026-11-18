@@ -3,7 +3,7 @@ use std::{cell::LazyCell, collections::{hash_map::Entry, BTreeMap}};
 use fnv::FnvHashMap;
 
 use crate::{
-    core::{utils, Hachimi, SugoiClient},
+    core::{utils, Hachimi, SugoiClient, game::Region},
     il2cpp::{ext::{Il2CppStringExt, StringExt}, symbols::{get_method_overload_addr, unbox}, types::*}
 };
 
@@ -48,8 +48,12 @@ pub extern "C" fn Get(id: i32) -> *mut Il2CppString {
         }
         if hachimi.config.load().auto_translate_localize && !str.is_null() && unsafe { (*str).length > 0 } {
             let s = unsafe { (*str).as_utf16str().to_string() };
-            if let Ok(res) = SugoiClient::instance().translate_one(s) {
-                return res.to_il2cpp_string();
+
+            let sugoi = SugoiClient::instance();
+            if let Some(translated) = sugoi.get_cached(&s) {
+                return translated.to_il2cpp_string();
+            } else {
+                sugoi.translate_async(s);
             }
         }
         str
@@ -76,9 +80,13 @@ pub fn dump_strings() -> BTreeMap<String, String> {
 
 pub fn init(umamusume: *const Il2CppImage) {
     get_class_or_return!(umamusume, Gallop, Localize);
-    find_nested_class_or_return!(Localize, JP);
 
-    let Get_addr = get_method_overload_addr(JP, "Get", &[Il2CppTypeEnum_IL2CPP_TYPE_VALUETYPE]);
+    let Get_addr = if Hachimi::instance().game.region == Region::Taiwan {
+        get_method_overload_addr(Localize, "Get", &[Il2CppTypeEnum_IL2CPP_TYPE_VALUETYPE])
+    } else {
+        find_nested_class_or_return!(Localize, JP);
+        get_method_overload_addr(JP, "Get", &[Il2CppTypeEnum_IL2CPP_TYPE_VALUETYPE])
+    };
 
     new_hook!(Get_addr, Get);
 }

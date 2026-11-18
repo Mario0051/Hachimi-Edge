@@ -2,13 +2,14 @@
 
 # Hachimi Edge
 
-[English](README.md) | [简体中文](README-zh_cn.md) | 繁體中文
+[English](README.md) | [简体中文](README-zh_cn.md) | 繁體中文 | [Filipino](README-fil.md) | [한국어](README-ko.md) | [Русский](README-ru.md)
 
 [![Discord 伺服器](https://dcbadge.limes.pink/api/server/https://discord.gg/YjBgmuqqYr)](https://discord.gg/YjBgmuqqYr)
 
 馬姑娘:媠達比的遊戲強化與翻譯模組
 
-<img height="400" src="assets/screenshot.jpg">
+<img width="100%" height="100%" src="assets/screenshot-1.png">
+<img width="100%" height="100%" src="assets/screenshot-2.png">
 
 # 功能特色
 - **高品質翻譯支援：** Hachimi 搭載了進階的翻譯處理功能，讓翻譯結果更自然流暢（支援複數型、序數詞等），並避免破壞遊戲介面。它也支援翻譯絕大多數的遊戲內容，無需手動修改資源檔！

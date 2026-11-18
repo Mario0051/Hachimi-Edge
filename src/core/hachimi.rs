@@ -1,37 +1,74 @@
-use std::{fs, path::{Path, PathBuf}, process, sync::{atomic::{self, AtomicBool, AtomicI32}, Arc, Mutex}};
+use std::{fs, path::{Path, PathBuf}, process, sync::{atomic::{self, AtomicBool, AtomicI32}, Arc, Mutex}, time::{Duration, Instant}};
 use arc_swap::ArcSwap;
 use fnv::{FnvHashMap, FnvHashSet};
 use once_cell::sync::OnceCell;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use textwrap::wrap_algorithms::Penalties;
 
-use crate::{core::{plugin_api::Plugin, updater}, gui_impl, hachimi_impl, il2cpp::{self, hook::umamusume::{CySpringController::SpringUpdateMode, GameSystem}, sql::{CharacterData, SkillInfo}}};
+use crate::{core::{gui, plugin_api::Plugin, updater}, gui_impl, hachimi_impl, il2cpp::{self, hook::umamusume::{CySpringController::SpringUpdateMode, GameSystem}, sql::{CharacterData, LiveData, SkillDataDesc, SkillInfo}}};
 
 use super::{game::{Game, Region}, ipc, plurals, template, template_filters, tl_repo, utils, Error, Interceptor};
 
 pub const REPO_PATH: &str = "kairusds/Hachimi-Edge";
+pub const CHANGELOG_REPO_ENDPOINT: &str = "https://codeberg.org/Hachimi-Edge/changelog/raw/branch/main";
 pub const GITHUB_API: &str = "https://api.github.com/repos";
 pub const CODEBERG_API: &str = "https://codeberg.org/api/v1/repos";
 pub const WEBSITE_URL: &str = "https://hachimi.noccu.art";
-pub const UMAPATCHER_PACKAGE_NAME: &str = "com.leadrdrk.umapatcher.edge";
-pub const UMAPATCHER_INSTALL_URL: &str = "https://github.com/kairusds/UmaPatcher-Edge/releases/latest";
+pub const UMAPATCHER_UPDATER_DEEPLINK: &str = "umapatcher-edge://update-hachimi";
+pub const RACE_MECHANICS_URL: &str = "https://docs.google.com/document/d/15VzW9W2tXBBTibBRbZ8IVpW6HaMX8H0RP03kq6Az7Xg";
 
-pub static CONFIG_LOAD_ERROR: AtomicBool = AtomicBool::new(false);
+static mut ORIG_SQLITE3_OPEN_V2: Option<extern "C" fn(*const i8, *mut *mut std::ffi::c_void, i32, *const i8) -> i32> = None;
+static mut ORIG_SQLITE3_KEY: Option<extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, i32) -> i32> = None;
+
+extern "C" fn sqlite3_open_v2_hook(filename: *const i8, pp_db: *mut *mut std::ffi::c_void, flags: i32, z_vfs: *const i8) -> i32 {
+    let result = unsafe { ORIG_SQLITE3_OPEN_V2.unwrap()(filename, pp_db, flags, z_vfs) };
+
+    if result == 0 && !pp_db.is_null() {
+        if crate::il2cpp::sql::AUTO_UNLOCK_NEXT_DB.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            let raw_key = crate::il2cpp::sql::RETRIEVED_RAW_KEY.lock().unwrap();
+            if !raw_key.is_empty() {
+                let db_ptr = unsafe { *pp_db };
+                unsafe { ORIG_SQLITE3_KEY.unwrap()(db_ptr, raw_key.as_ptr() as *const std::ffi::c_void, raw_key.len() as i32) };
+            }
+        }
+    }
+    result
+}
+
+extern "C" fn sqlite3_key_hook(db: *mut std::ffi::c_void, p_key: *const std::ffi::c_void, n_key: i32) -> i32 {
+    if !p_key.is_null() {
+        let mut raw_guard = crate::il2cpp::sql::RETRIEVED_RAW_KEY.lock().unwrap();
+        if raw_guard.is_empty() {
+            let key_bytes = unsafe { std::slice::from_raw_parts(p_key as *const u8, n_key as usize) };
+            *raw_guard = key_bytes.to_vec();
+        }
+    }
+    unsafe { ORIG_SQLITE3_KEY.unwrap()(db, p_key, n_key) }
+}
 
 pub struct Hachimi {
     // Hooking stuff
     pub interceptor: Interceptor,
     pub hooking_finished: AtomicBool,
     pub plugins: Mutex<Vec<Plugin>>,
+    pub plugin_init_callbacks: Mutex<Vec<(usize, usize)>>,
+    #[cfg(target_os = "windows")]
+    pub present_callbacks: Mutex<Vec<(usize, usize)>>,
+
+    // Translation repo manager
+    pub tl_repo_manager: Mutex<tl_repo::RepoList>,
 
     // Localized data
     pub localized_data: ArcSwap<LocalizedData>,
     pub tl_updater: Arc<tl_repo::Updater>,
+    pub tl_update_cmd: Mutex<Option<crossbeam_channel::Sender<()>>>,
 
     // Character data
     pub chara_data: ArcSwap<CharacterData>,
+    pub live_data: ArcSwap<LiveData>,
     // Untranslated skill info
     pub skill_info: ArcSwap<SkillInfo>,
+    pub skill_data_desc: ArcSwap<SkillDataDesc>,
 
     // Shared properties
     pub game: Game,
@@ -40,6 +77,9 @@ pub struct Hachimi {
 
     /// -1 = default
     pub target_fps: AtomicI32,
+
+    #[cfg(target_os = "windows")]
+    pub target_fps_unfocused: AtomicI32,
 
     #[cfg(target_os = "windows")]
     pub vsync_count: AtomicI32,
@@ -54,6 +94,8 @@ pub struct Hachimi {
 }
 
 static INSTANCE: OnceCell<Arc<Hachimi>> = OnceCell::new();
+
+static SKILL_DATA_DESC_REBUILD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 impl Hachimi {
     pub fn init() -> bool {
@@ -85,6 +127,11 @@ impl Hachimi {
 
         info!("Hachimi {}", env!("HACHIMI_DISPLAY_VERSION"));
         info!("Game region: {}", instance.game.region);
+
+        if let Err(e) = instance.repair_tl_repo_state() {
+            error!("TL repo repair failed: {}", e);
+        }
+
         instance.load_localized_data();
 
         INSTANCE.set(Arc::new(instance)).is_ok()
@@ -111,19 +158,30 @@ impl Hachimi {
             interceptor: Interceptor::default(),
             hooking_finished: AtomicBool::new(false),
             plugins: Mutex::default(),
+            plugin_init_callbacks: Mutex::default(),
+            #[cfg(target_os = "windows")]
+            present_callbacks: Mutex::default(),
+
+            tl_repo_manager: Mutex::new(tl_repo::RepoList::default()),
 
             // Don't load localized data initially since it might fail, logging the error is not possible here
             localized_data: ArcSwap::default(),
             tl_updater: Arc::default(),
+            tl_update_cmd: Mutex::new(None),
 
             // Same with these
             chara_data: ArcSwap::default(),
+            live_data: ArcSwap::default(),
             skill_info: ArcSwap::default(),
+            skill_data_desc: ArcSwap::default(),
 
             game,
             template_parser: template::Parser::new(&template_filters::LIST),
 
             target_fps: AtomicI32::new(config.target_fps.unwrap_or(-1)),
+
+            #[cfg(target_os = "windows")]
+            target_fps_unfocused: AtomicI32::new(config.windows.target_fps_unfocused.unwrap_or(-1)),
 
             #[cfg(target_os = "windows")]
             vsync_count: AtomicI32::new(config.windows.vsync_count),
@@ -146,10 +204,13 @@ impl Hachimi {
         if fs::metadata(&config_path).is_ok() {
             let json = fs::read_to_string(&config_path)?;
             match serde_json::from_str::<Config>(&json) {
-                Ok(config) => Ok(config),
+                Ok(mut config) => {
+                    config.shortcuts.retain(|s| s.option.is_available());
+                    Ok(config)
+                }
                 Err(e) => {
                     eprintln!("Failed to parse config: {}", e);
-                    CONFIG_LOAD_ERROR.store(true, std::sync::atomic::Ordering::Release);
+                    gui::request_notification(gui::NotificationRequest::ConfigLoadError);
                     Ok(Config::default())
                 }
             }
@@ -169,6 +230,10 @@ impl Hachimi {
 
         new_config.language.set_locale();
         self.config.store(Arc::new(new_config));
+
+        if Hachimi::is_initialized() && self.hooking_finished.load(atomic::Ordering::Relaxed) {
+            Hachimi::instance().start_translation_updater_thread();
+        }
     }
 
     pub fn save_config(&self, config: &Config) -> Result<(), Error> {
@@ -180,11 +245,28 @@ impl Hachimi {
     }
 
     pub fn save_and_reload_config(&self, config: Config) -> Result<(), Error> {
+        let old_id = self.config.load().selected_tl_repo_id;
         self.save_config(&config)?;
 
         config.language.set_locale();
         self.config.store(Arc::new(config));
+
+        let new_config = self.config.load();
+        if new_config.selected_tl_repo_id != old_id {
+            self.load_localized_data();
+            gui::request_notification(gui::NotificationRequest::TLRepoChanged);
+        }
+
+        if Hachimi::is_initialized() && self.hooking_finished.load(atomic::Ordering::Relaxed) {
+            Hachimi::instance().start_translation_updater_thread();
+        }
+
         Ok(())
+    }
+
+    pub fn get_active_tl_dir(&self) -> Option<PathBuf> {
+        let id = self.config.load().selected_tl_repo_id?;
+        Some(self.get_repo_dir(id))
     }
 
     pub fn load_localized_data(&self) {
@@ -192,14 +274,44 @@ impl Hachimi {
             warn!("Update in progress, not loading localized data");
             return;
         }
-        let new_data = match LocalizedData::new(&self.config.load(), &self.game.data_dir) {
+
+        let config = self.config.load();
+        let ld_path = self.get_active_tl_dir().or_else(|| {
+            config.localized_data_dir.as_ref().map(|p| self.game.data_dir.join(p))
+        });
+
+        let mut new_data = match LocalizedData::new(&self.config.load(), ld_path) {
             Ok(v) => v,
             Err(e) => {
                 error!("Failed to load localized data: {}", e);
                 return;
             }
         };
+
+        if self.game.region == Region::Global {
+            for id in 55..=66 {
+                new_data.localize_dict.remove(&format!("Common{id:04}"));
+            }
+        }
+        
         self.localized_data.store(Arc::new(new_data));
+
+        if !self.skill_data_desc.load().descs.is_empty() {
+            SKILL_DATA_DESC_REBUILD_REQUESTED.store(true, atomic::Ordering::Release);
+        }
+    }
+
+    pub fn drain_skill_data_desc_rebuild(&self) {
+        if !SKILL_DATA_DESC_REBUILD_REQUESTED.swap(false, atomic::Ordering::AcqRel) {
+            return;
+        }
+        if self.skill_data_desc.load().descs.is_empty() {
+            return;
+        }
+        let data = SkillDataDesc::load_from_db();
+        if !data.descs.is_empty() {
+            self.skill_data_desc.store(Arc::new(data));
+        }
     }
 
     pub fn init_character_data(&self) {
@@ -207,6 +319,14 @@ impl Hachimi {
             let data = CharacterData::load_from_db();
             self.chara_data.store(Arc::new(data));
             info!("Character database loaded successfully.");
+        }
+    }
+
+    pub fn init_live_data(&self) {
+        if self.live_data.load().live_ids.is_empty() {
+            let data = LiveData::load_from_db();
+            self.live_data.store(Arc::new(data));
+            info!("Live database loaded successfully.");
         }
     }
 
@@ -218,7 +338,68 @@ impl Hachimi {
         }
     }
 
+    pub fn init_skill_data_desc(&self) {
+        if self.skill_data_desc.load().descs.is_empty() {
+            let data = SkillDataDesc::load_from_db();
+            self.skill_data_desc.store(Arc::new(data));
+            info!("Skill data descriptions loaded successfully.");
+        }
+    }
+
     pub fn on_dlopen(&self, filename: &str, handle: usize) -> bool {
+        let filename_lower = filename.to_lowercase();
+
+        #[cfg(target_os = "windows")]
+        if filename_lower.contains("libnative.dll") {
+            unsafe {
+                use windows::Win32::System::LibraryLoader::GetProcAddress;
+                use windows::core::PCSTR;
+
+                let h_module = windows::Win32::Foundation::HMODULE(handle as _);
+                let open_addr = GetProcAddress(h_module, PCSTR("sqlite3_open_v2\0".as_ptr()));
+                let key_addr = GetProcAddress(h_module, PCSTR("sqlite3_key\0".as_ptr()));
+
+                if let Some(addr) = open_addr {
+                    if let Ok(orig) = self.interceptor.hook(addr as usize, sqlite3_open_v2_hook as *const () as usize) {
+                        ORIG_SQLITE3_OPEN_V2 = Some(std::mem::transmute(orig));
+                        info!("Successfully hooked native sqlite3_open_v2 (Windows)");
+                    }
+                }
+                if let Some(addr) = key_addr {
+                    if let Ok(orig) = self.interceptor.hook(addr as usize, sqlite3_key_hook as *const () as usize) {
+                        ORIG_SQLITE3_KEY = Some(std::mem::transmute(orig));
+                        info!("Successfully hooked native sqlite3_key (Windows)");
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "android")]
+        if filename_lower.contains("libnative.so") {
+            unsafe {
+                let handle_ptr = handle as *mut libc::c_void;
+
+                let open_sym = b"sqlite3_open_v2\0".as_ptr() as *const libc::c_char;
+                let key_sym = b"sqlite3_key\0".as_ptr() as *const libc::c_char;
+
+                let open_addr = libc::dlsym(handle_ptr, open_sym);
+                let key_addr = libc::dlsym(handle_ptr, key_sym);
+
+                if !open_addr.is_null() {
+                    if let Ok(orig) = self.interceptor.hook(open_addr as usize, sqlite3_open_v2_hook  as *const () as usize) {
+                        ORIG_SQLITE3_OPEN_V2 = Some(std::mem::transmute(orig));
+                        info!("Successfully hooked native sqlite3_open_v2 (Android)");
+                    }
+                }
+                if !key_addr.is_null() {
+                    if let Ok(orig) = self.interceptor.hook(key_addr as usize, sqlite3_key_hook as *const () as usize) {
+                        ORIG_SQLITE3_KEY = Some(std::mem::transmute(orig));
+                        info!("Successfully hooked native sqlite3_key (Android)");
+                    }
+                }
+            }
+        }
+
         // Prevent double initialization
         if self.hooking_finished.load(atomic::Ordering::Relaxed) { return false; }
 
@@ -257,6 +438,8 @@ impl Hachimi {
 
         hachimi_impl::on_hooking_finished(self);
 
+        Hachimi::instance().start_translation_updater_thread();
+
         for plugin in self.plugins.lock().unwrap().iter() {
             info!("Initializing plugin: {}", plugin.name);
             let res = plugin.init();
@@ -270,6 +453,121 @@ impl Hachimi {
         self.game.data_dir.join(rel_path)
     }
 
+    pub fn get_repo_dir(&self, id: u32) -> PathBuf {
+        if id == 1 {
+            let legacy = self.game.data_dir.join("localized_data");
+            if legacy.is_dir() {
+                return legacy;
+            }
+        }
+        self.game.data_dir.join(format!("localized_data_{id}"))
+    }
+
+    fn repair_tl_repo_state(&self) -> Result<(), Error> {
+        let repos_path = self.get_data_path(".tl_repos");
+        let old_data_dir = self.game.data_dir.join("localized_data");
+        let mut manager = self.tl_repo_manager.lock().unwrap();
+
+        if !repos_path.exists() && old_data_dir.is_dir() {
+            info!("Found legacy 'localized_data' folder and no .tl_repos; migrating…");
+
+            let config = self.config.load();
+            if let Some(index) = &config.translation_repo_index {
+                let id = manager.add(index.clone());
+                manager.save(&repos_path)?;
+
+                let mut new_config = (**config).clone();
+                new_config.selected_tl_repo_id = Some(id);
+                self.save_and_reload_config(new_config)?;
+            } else {
+                manager.save(&repos_path)?;
+            }
+        }
+
+        *manager = if repos_path.exists() {
+            tl_repo::RepoList::load(&repos_path).unwrap_or_else(|e| {
+                warn!("Failed to load .tl_repos ({e}); starting fresh");
+                tl_repo::RepoList::default()
+            })
+        } else {
+            tl_repo::RepoList::default()
+        };
+
+        let config = self.config.load();
+        let index = config.translation_repo_index.clone();
+        let current_id = config.selected_tl_repo_id;
+
+        let mut manager_dirty = false;
+
+        match current_id {
+            Some(id) => {
+                if manager.find_by_id(id) != index.as_deref() {
+                    warn!("TL repo ID {id} does not match index {index:?}; re-resolving");
+
+                    let mut cleared = (**config).clone();
+                    cleared.selected_tl_repo_id = None;
+                    self.save_config(&cleared)?;
+                    self.config.store(Arc::new(cleared));
+
+                    if let Some(ref idx) = index {
+                        let new_id = match manager.find_by_index(idx) {
+                            Some(existing) => existing,
+                            None => {
+                                let nid = manager.add(idx.clone());
+                                manager_dirty = true;
+                                nid
+                            }
+                        };
+
+                        let mut new_config = self.config.load().as_ref().clone();
+                        new_config.selected_tl_repo_id = Some(new_id);
+                        self.save_and_reload_config(new_config)?;
+                    } else {
+                        let data_dir = self.get_repo_dir(id);
+                        if !data_dir.is_dir() {
+                            warn!("TL repo data folder '{}' is missing, clearing localised data until next update...", data_dir.display());
+                            self.localized_data.store(Arc::new(LocalizedData::default()));
+                            gui::request_notification(gui::NotificationRequest::TLFolderMissing);
+                        }
+                    }
+                }
+            }
+
+            None => {
+                if let Some(ref idx) = index {
+                    let id = match manager.find_by_index(idx) {
+                        Some(existing) => existing,
+                        None => {
+                            let nid = manager.add(idx.clone());
+                            manager_dirty = true;
+                            nid
+                        }
+                    };
+                    let mut new_config = (**config).clone();
+                    new_config.selected_tl_repo_id = Some(id);
+                    self.save_and_reload_config(new_config)?;
+                }
+            }
+        }
+
+        if manager_dirty {
+            manager.save(&repos_path)?;
+        }
+
+        if let Some(id) = self.config.load().selected_tl_repo_id {
+            let old_cache = self.get_data_path(".tl_repo_cache");
+            if old_cache.exists() {
+                let new_cache = self.get_data_path(format!(".tl_repo_cache_{}", id));
+                info!("Migrating standalone legacy tl repo cache file to {}", new_cache.display());
+                if let Err(e) = fs::rename(&old_cache, &new_cache) {
+                    warn!("Failed to rename legacy tp repo cache file: {e}");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn run_auto_update_check(&self) {
         if !self.config.load().disable_auto_update_check {
             // Check for hachimi updates first, then translations
@@ -277,10 +575,81 @@ impl Hachimi {
             self.updater.clone().check_for_updates(|new_update| {
                 let hachimi = Hachimi::instance();
                 if !new_update && !hachimi.config.load().translator_mode {
-                    hachimi.tl_updater.clone().check_for_updates(false);
+                    hachimi.tl_updater.clone().check_for_updates(false, false);
                 }
             });
         }
+    }
+
+    pub fn start_translation_updater_thread(self: Arc<Self>) {
+        let mut cmd_lock = self.tl_update_cmd.lock().unwrap();
+
+        // drop the old sender to signal the existing thread to exit.
+        // Its recv_timeout will return Disconnected within 1 second.
+        *cmd_lock = None;
+
+        let config = self.config.load();
+        if config.tl_auto_updater_mode == TLAutoUpdaterMode::Disabled
+            || config.tl_auto_updater_interval_sec == 0
+            || config.translator_mode
+        {
+            return;
+        }
+
+        let (tx, rx) = crossbeam_channel::bounded::<()>(1);
+        *cmd_lock = Some(tx);
+        drop(cmd_lock);
+
+        let interval = Duration::from_secs(config.tl_auto_updater_interval_sec);
+
+        std::thread::Builder::new()
+            .name("translation_updater_thread".into())
+            .spawn(move || {
+                let mut next_check = Instant::now() + interval;
+                let mut last_interval = interval;
+
+                loop {
+                    let config = self.config.load();
+                    if config.tl_auto_updater_mode == TLAutoUpdaterMode::Disabled
+                        || config.tl_auto_updater_interval_sec == 0
+                        || config.translator_mode
+                    {
+                        break;
+                    }
+
+                    let interval = Duration::from_secs(config.tl_auto_updater_interval_sec);
+
+                    // realign timer if interval changed
+                    if interval != last_interval {
+                        next_check = Instant::now() + interval;
+                        last_interval = interval;
+                    }
+
+                    // don't re-check while user hasn't acted on the current update
+                    if self.tl_updater.has_pending_update() {
+                        next_check = Instant::now() + interval;
+                        continue;
+                    }
+
+                    if Instant::now() >= next_check {
+                        let silent = config.tl_auto_updater_mode == TLAutoUpdaterMode::Silent;
+                        info!("Running translation updater check (Silent: {})...", silent);
+                        self.tl_updater.clone().check_for_updates(false, silent);
+                        next_check = Instant::now() + interval;
+                    }
+
+                    // interruptible sleep. wakes at least once/sec,
+                    // exits immediately when sender is dropped (restart/stop).
+                    let remaining = next_check.saturating_duration_since(Instant::now());
+                    let sleep = remaining.min(Duration::from_secs(1));
+
+                    match rx.recv_timeout(sleep) {
+                        Ok(()) | Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            })
+            .expect("Failed to spawn translation updater thread");
     }
 }
 
@@ -288,6 +657,113 @@ fn default_serde_instance<'a, T: Deserialize<'a>>() -> Option<T> {
     let empty_data = std::iter::empty::<((), ())>();
     let empty_deserializer = serde::de::value::MapDeserializer::<_, serde::de::value::Error>::new(empty_data);
     T::deserialize(empty_deserializer).ok()
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum TLAutoUpdaterMode {
+    Disabled,
+    Periodic,
+    Silent
+}
+
+impl Default for TLAutoUpdaterMode {
+    fn default() -> Self { Self::Disabled }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct CaptionConfig {
+    #[serde(default)]
+    pub caption_enable: bool,
+    #[serde(default = "CaptionConfig::default_lines_char_count")]
+    pub caption_lines_char_count: i32,
+    #[serde(default = "CaptionConfig::default_font_size")]
+    pub caption_font_size: i32,
+    #[serde(default = "CaptionConfig::default_color")]
+    pub caption_color: String,
+    #[serde(default = "CaptionConfig::default_outline_size")]
+    pub caption_outline_size: String,
+    #[serde(default = "CaptionConfig::default_outline_color")]
+    pub caption_outline_color: String,
+    #[serde(default = "CaptionConfig::default_bg_alpha")]
+    pub caption_bg_alpha: f32,
+    #[serde(default = "CaptionConfig::default_pos_x")]
+    pub caption_pos_x: f32,
+    #[serde(default = "CaptionConfig::default_pos_y")]
+    pub caption_pos_y: f32,
+}
+
+impl Default for CaptionConfig {
+    fn default() -> Self {
+        Self {
+            caption_enable: false,
+            caption_lines_char_count: 26,
+            caption_font_size: 50,
+            caption_color: "White".to_owned(),
+            caption_outline_size: "L".to_owned(),
+            caption_outline_color: "Brown".to_owned(),
+            caption_bg_alpha: 0.0,
+            caption_pos_x: 0.0,
+            caption_pos_y: -3.0,
+        }
+    }
+}
+
+impl CaptionConfig {
+    fn default_lines_char_count() -> i32 { 26 }
+    fn default_font_size() -> i32 { 50 }
+    fn default_color() -> String { "White".to_owned() }
+    fn default_outline_size() -> String { "L".to_owned() }
+    fn default_outline_color() -> String { "Brown".to_owned() }
+    fn default_bg_alpha() -> f32 { 0.0 }
+    fn default_pos_x() -> f32 { 0.0 }
+    fn default_pos_y() -> f32 { -3.0 }
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq)]
+pub struct RaceStatHudCloneConfig {
+    #[serde(default = "Config::default_race_stat_hud_drag_x")]
+    pub drag_x: f32,
+    #[serde(default = "Config::default_race_stat_hud_drag_y")]
+    pub drag_y: f32,
+    #[serde(default)]
+    pub selected_character: usize,
+    #[serde(default)]
+    pub toggle_key: Option<i32>,
+    #[serde(default)]
+    pub open: bool
+}
+
+impl RaceStatHudCloneConfig {
+    pub fn drag_pos(&self) -> Option<(f32, f32)> {
+        if (0.0..=1.0).contains(&self.drag_x) && (0.0..=1.0).contains(&self.drag_y) {
+            Some((self.drag_x, self.drag_y))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ShortcutOption {
+    #[default]
+    ThemeEditor,
+    FreeCamera,
+    LiveVocalsSwap
+}
+
+impl ShortcutOption {
+    pub const ALL: [ShortcutOption; 3] = [
+        ShortcutOption::ThemeEditor,
+        ShortcutOption::FreeCamera,
+        ShortcutOption::LiveVocalsSwap
+    ];
+}
+
+#[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
+pub struct ShortcutEntry {
+    pub option: ShortcutOption,
+    #[serde(default)]
+    pub key: i32
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -304,19 +780,31 @@ pub struct Config {
     pub disable_gui: bool,
     #[serde(default)]
     pub disable_gui_once: bool,
+    // legacy fallback path. populated by old versions, new code uses selected_tl_repo_id + get_active_tl_dir() exclusively
+    // do NOT write this in new code
     pub localized_data_dir: Option<String>,
     pub target_fps: Option<i32>,
     #[serde(default = "Config::default_open_browser_url")]
     pub open_browser_url: String,
     #[serde(default = "Config::default_virtual_res_mult")]
     pub virtual_res_mult: f32,
+    #[serde(default)]
+    pub selected_tl_repo_id: Option<u32>,
     pub translation_repo_index: Option<String>,
     #[serde(default)]
     pub skip_first_time_setup: bool,
     #[serde(default)]
     pub lazy_translation_updates: bool,
     #[serde(default)]
+    pub etag_translation_updates: bool,
+    #[serde(default)]
     pub disable_auto_update_check: bool,
+
+    #[serde(default)]
+    pub tl_auto_updater_mode: TLAutoUpdaterMode,
+    #[serde(default = "Config::default_tl_auto_updater_interval_sec")]
+    pub tl_auto_updater_interval_sec: u64,
+
     #[serde(default)]
     pub disable_translations: bool,
     #[serde(default = "Config::default_gui_scale")]
@@ -333,6 +821,20 @@ pub struct Config {
     pub shadow_resolution: crate::il2cpp::hook::umamusume::CameraData::ShadowResolution,
     #[serde(default)]
     pub graphics_quality: crate::il2cpp::hook::umamusume::GraphicSettings::GraphicsQuality,
+    #[serde(default)]
+    pub shadow_distance: f32,
+    #[serde(default)]
+    pub soft_shadows: bool,
+    #[serde(default)]
+    pub soft_shadow_quality: crate::il2cpp::hook::Unity_RenderPipelines_Universal_Runtime::UniversalRenderPipelineAsset::SoftShadowQuality,
+    #[serde(default)]
+    pub shadow_depth_bias: Option<f32>,
+    #[serde(default)]
+    pub shadow_normal_bias: Option<f32>,
+    #[serde(default)]
+    pub force_chara_shadows: bool,
+    #[serde(default)]
+    pub story_shadow_type: crate::il2cpp::hook::umamusume::StoryTimelineBg3DClipData::ShadowType3d,
     #[serde(default = "Config::default_story_choice_auto_select_delay")]
     pub story_choice_auto_select_delay: f32,
     #[serde(default = "Config::default_story_tcps_multiplier")]
@@ -348,9 +850,17 @@ pub struct Config {
     #[serde(default = "Config::default_live_vocals_swap")]
     pub live_vocals_swap: [i32; 6],
     #[serde(default)]
+    pub live_vocals_swap_presets: std::collections::BTreeMap<i32, [i32; 6]>,
+    #[serde(default)]
+    pub shortcuts: Vec<ShortcutEntry>,
+    #[serde(default)]
     pub skill_info_dialog: bool,
     #[serde(default)]
-    pub homescreen_bgseason: crate::il2cpp::hook::umamusume::TimeUtil::BgSeason,
+    pub skill_data_desc: bool,
+    #[serde(default)]
+    pub old_config_editor: bool,
+    #[serde(default)]
+    pub homescreen_bgseason: crate::il2cpp::hook::umamusume::GameDefine::BgSeason,
     pub sugoi_url: Option<String>,
     #[serde(default)]
     pub auto_translate_stories: bool,
@@ -359,7 +869,55 @@ pub struct Config {
     #[serde(default)]
     pub disable_skill_name_translation: bool,
     #[serde(default)]
+    pub disable_factor_name_translation: bool,
+    #[serde(default)]
     pub hide_ingame_ui_hotkey: bool,
+    #[serde(default)]
+    pub race_stat_hud: bool,
+    #[serde(default)]
+    pub race_stat_hud_toggle_button: bool,
+    #[serde(default)]
+    pub race_stat_had_autoscroll_0: bool,
+    #[serde(default)]
+    pub race_stat_had_autoscroll_1: bool,
+    #[serde(default)]
+    pub race_stat_hud_draggable: bool,
+    #[serde(default)]
+    pub race_stat_hud_draggable_save: bool,
+    #[serde(default)]
+    pub race_stat_hud_resizable: bool,
+    #[serde(default = "Config::default_race_stat_hud_drag_x")]
+    pub race_stat_hud_drag_x: f32,
+    #[serde(default = "Config::default_race_stat_hud_drag_y")]
+    pub race_stat_hud_drag_y: f32,
+    #[serde(default)]
+    pub race_stat_hud_main_open: bool,
+    #[serde(default)]
+    pub race_stat_hud_clones: Vec<RaceStatHudCloneConfig>,
+    #[serde(default)]
+    pub race_stat_hud_selected_character: Option<usize>,
+    #[serde(default)]
+    pub race_stat_hud_persist_clones: bool,
+    #[serde(default)]
+    pub race_stat_hud_persist_selected_index: bool,
+    #[serde(default = "Config::default_race_stat_hud_width_scale")]
+    pub race_stat_hud_width_scale: f32,
+    #[serde(default = "Config::default_race_stat_hud_height_scale")]
+    pub race_stat_hud_height_scale: f32,
+    #[serde(default = "Config::default_race_stat_hud_opacity_scale")]
+    pub race_stat_hud_opacity_scale: f32,
+    #[serde(default)]
+    pub race_playback_slider: bool,
+    #[serde(default = "Config::default_true")]
+    pub race_playback_slider_always: bool,
+    #[serde(default)]
+    pub race_playback_button: bool,
+    #[serde(default)]
+    pub race_playback_key_enable: bool,
+    #[serde(flatten)]
+    pub caption: CaptionConfig,
+    #[serde(default)]
+    pub disable_tap_effect: bool,
     #[serde(default)]
     pub language: Language,
     #[serde(default = "Config::default_meta_index_url")]
@@ -367,8 +925,29 @@ pub struct Config {
     #[serde(default)]
     pub ipv4_only: bool,
     pub physics_update_mode: Option<SpringUpdateMode>,
+    #[serde(default)]
+    pub cyspring_mono_uncap_frame_scale: bool,
     #[serde(default = "Config::default_ui_animation_scale")]
     pub ui_animation_scale: f32,
+    #[serde(default)]
+    pub trainer_live_landscape: bool,
+    #[serde(default)]
+    pub live_slider_always_show: bool,
+    #[serde(default)]
+    pub live_playback_loop: bool,
+    #[serde(default)]
+    pub champions_live_show_text: bool,
+    #[serde(default = "Config::default_champions_live_resource_id")]
+    pub champions_live_resource_id: i32,
+    #[serde(default = "Config::default_champions_live_year")]
+    pub champions_live_year: i32,
+    #[serde(default)]
+    pub hide_now_loading: bool,
+    #[serde(default)]
+    pub replace_to_builtin_font: bool,
+    pub custom_font_file: Option<String>,
+    #[serde(default)]
+    pub custom_font_file_warning: bool,
     #[serde(default)]
     pub disabled_hooks: FnvHashSet<String>,
 
@@ -410,12 +989,21 @@ impl Config {
     fn default_meta_index_url() -> String { "https://gitlab.com/umatl/hachimi-meta/-/raw/main/meta.json".to_owned() }
     fn default_ui_animation_scale() -> f32 { 1.0 }
     fn default_live_vocals_swap() -> [i32; 6] { [0; 6] }
+    fn default_champions_live_resource_id() -> i32 { 15 }
+    fn default_champions_live_year() -> i32 { 2025 }
     pub fn default_ui_accent() -> egui::Color32 { egui::Color32::from_rgb(100, 150, 240) }
     pub fn default_window_fill() -> egui::Color32 { egui::Color32::from_rgba_premultiplied(27, 27, 27, 220) }
     pub fn default_panel_fill() -> egui::Color32 { egui::Color32::from_rgba_premultiplied(27, 27, 27, 220) }
     pub fn default_extreme_bg() -> egui::Color32 { egui::Color32::from_rgb(15, 15, 15) }
     pub fn default_text_color() -> egui::Color32 { egui::Color32::from_gray(170) }
     pub fn default_window_rounding() -> f32 { 10.0 }
+    fn default_tl_auto_updater_interval_sec() -> u64 { 3600 }
+    fn default_race_stat_hud_drag_x() -> f32 { -1.0 }
+    fn default_race_stat_hud_drag_y() -> f32 { -1.0 }
+    fn default_race_stat_hud_width_scale() -> f32 { 1.0 }
+    fn default_race_stat_hud_height_scale() -> f32 { 1.0 }
+    fn default_race_stat_hud_opacity_scale() -> f32 { 1.0 }
+    fn default_true() -> bool { true }
 }
 
 impl Default for Config {
@@ -479,7 +1067,13 @@ pub enum Language {
     BPortuguese,
 
     #[serde(rename = "fil")]
-    Filipino
+    Filipino,
+
+    #[serde(rename = "ru")]
+    Russian,
+
+    #[serde(rename = "ko")]
+    Korean
 }
 
 impl Default for Language {
@@ -499,6 +1093,10 @@ impl Default for Language {
             Self::BPortuguese
         } else if locale.starts_with("fil") {
             Self::Filipino
+        } else if locale.starts_with("ru") {
+            Self::Russian
+        } else if locale.starts_with("ko") {
+            Self::Korean
         } else {
             Self::English
         }
@@ -514,7 +1112,9 @@ impl Language {
         Self::Indonesian.choice(),
         Self::Spanish.choice(),
         Self::BPortuguese.choice(),
-        Self::Filipino.choice()
+        Self::Filipino.choice(),
+        Self::Russian.choice(),
+        Self::Korean.choice()
     ];
 
     pub fn set_locale(&self) {
@@ -530,7 +1130,9 @@ impl Language {
             Language::Indonesian => "id",
             Language::Spanish => "es",
             Language::BPortuguese => "pt-br",
-            Language::Filipino => "fil"
+            Language::Filipino => "fil",
+            Language::Russian => "ru",
+            Language::Korean => "ko"
         }
     }
 
@@ -543,7 +1145,9 @@ impl Language {
             Language::Indonesian => "Bahasa Indonesia",
             Language::Spanish => "Español (ES)",
             Language::BPortuguese => "Português (Brasil)",
-            Language::Filipino => "Filipino"
+            Language::Filipino => "Filipino",
+            Language::Russian => "Русский",
+            Language::Korean => "한국어"
         }
     }
 
@@ -563,6 +1167,7 @@ pub struct LocalizedData {
     pub character_system_text_dict: FnvHashMap<i32, FnvHashMap<i32, String>>, // {"character_id": {"voice_id": "text"}}
     pub race_jikkyo_comment_dict: FnvHashMap<i32, String>, // {"id": "text"}
     pub race_jikkyo_message_dict: FnvHashMap<i32, String>, // {"id": "text"}
+    pub skill_data_desc_dict: FnvHashMap<String, String>, // {"skill_data_desc.<key>": "text"}
     assets_path: Option<PathBuf>,
 
     pub plural_form: plurals::Resolver,
@@ -571,23 +1176,32 @@ pub struct LocalizedData {
     pub wrapper_penalties: Penalties
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CustomRubyBlock {
+    pub block_index: i32,
+    pub rubies: Vec<CustomRubyDef>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CustomRubyDef {
+    pub char_x: f32,
+    pub char_y: f32,
+    pub ruby_text: String,
+}
+
 impl LocalizedData {
-    fn new(config: &Config, data_dir: &Path) -> Result<LocalizedData, Error> {
+    fn new(config: &Config, ld_path: Option<PathBuf>) -> Result<LocalizedData, Error> {
         if config.disable_translations {
             return Ok(LocalizedData::default());
         }
 
-        let path: Option<PathBuf>;
-        let config: LocalizedDataConfig = if let Some(ld_dir) = &config.localized_data_dir {
-            let ld_path = Path::new(data_dir).join(ld_dir);
-
+        let path = ld_path;
+        let config: LocalizedDataConfig = if let Some(ref p) = path {
             // Create .nomedia
             #[cfg(target_os = "android")]
-            { _ = fs::OpenOptions::new().create_new(true).write(true).open(ld_path.join(".nomedia")); }
+            { _ = fs::OpenOptions::new().create_new(true).write(true).open(p.join(".nomedia")); }
 
-            let ld_config_path = ld_path.join("config.json");
-            path = Some(ld_path);
-
+            let ld_config_path = p.join("config.json");
             if fs::metadata(&ld_config_path).is_ok() {
                 let json = fs::read_to_string(&ld_config_path)?;
                 serde_json::from_str(&json)?
@@ -598,7 +1212,6 @@ impl LocalizedData {
             }
         }
         else {
-            path = None;
             LocalizedDataConfig::default()
         };
 
@@ -614,6 +1227,7 @@ impl LocalizedData {
             character_system_text_dict: Self::load_dict_static(&path, config.character_system_text_dict.as_ref()).unwrap_or_default(),
             race_jikkyo_comment_dict: Self::load_dict_static(&path, config.race_jikkyo_comment_dict.as_ref()).unwrap_or_default(),
             race_jikkyo_message_dict: Self::load_dict_static(&path, config.race_jikkyo_message_dict.as_ref()).unwrap_or_default(),
+            skill_data_desc_dict: Self::load_dict_static_ex(&path, Some("skill_data_desc_dict.json"), true).unwrap_or_default(),
             assets_path: path.as_ref()
                 .map(|p| config.assets_dir.as_ref()
                     .map(|dir| p.join(dir))
@@ -713,6 +1327,24 @@ impl LocalizedData {
         path.set_extension("json");
         self.load_assets_dict(Some(path)).unwrap_or_else(|| AssetInfo::default())
     }
+
+    pub fn load_custom_story_ruby(&self, ast_ruby_name: &str) -> Option<Vec<CustomRubyBlock>> {
+        // let filename = ast_ruby_name.split('/').last().unwrap_or(ast_ruby_name);
+        let filename = ast_ruby_name.split('/').next_back().unwrap_or(ast_ruby_name);
+
+        let filename_no_ext = filename.strip_suffix(".asset").unwrap_or(filename);
+
+        let id_str = filename_no_ext.strip_prefix("ast_ruby_")?;
+
+        if id_str.len() < 6 { return None; }
+
+        let category_id = &id_str[0..2];
+        let story_id = &id_str[2..6];
+
+        let path = format!("story/data/{}/{}/{}.json", category_id, story_id, filename_no_ext);
+
+        self.load_assets_dict(Some(path))
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -750,10 +1382,13 @@ pub struct LocalizedDataConfig {
     pub story_line_count_offset: Option<i32>,
     pub text_frame_line_spacing_multiplier: Option<f32>,
     pub text_frame_font_size_multiplier: Option<f32>,
+    pub choice_btn_line_spacing_multiplier: Option<f32>,
     #[serde(default)]
     pub skill_formatting: SkillFormatting,
     #[serde(default)]
     pub text_common_allow_overflow: bool,
+    #[serde(default)]
+    pub text_common_best_fit: bool,
     #[serde(default)]
     pub now_loading_comic_title_ellipsis: bool,
 

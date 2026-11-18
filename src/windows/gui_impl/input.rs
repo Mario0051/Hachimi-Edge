@@ -9,16 +9,22 @@ use windows::Win32::{
         SystemServices::{MK_CONTROL, MK_SHIFT}
     },
     UI::{
-        Input::KeyboardAndMouse::{
-            GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
-            VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN,
-            VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+        Input::{
+            Ime::{
+                ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, GCS_COMPSTR, GCS_RESULTSTR
+            },
+            KeyboardAndMouse::{
+                GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
+                VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LSHIFT, VK_NEXT, VK_PRIOR, VK_RETURN,
+                VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+            }
         },
         WindowsAndMessaging::{
             WHEEL_DELTA, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
             WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN,
             WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK,
-            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_INPUT
+            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_INPUT,
+            WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION
         },
     },
 };
@@ -140,9 +146,7 @@ pub fn process(input: &mut RawInput, zoom_factor: f32, umsg: u32, wparam: usize,
                 let events = &mut input.events;
                 let mods = get_key_modifiers(msg);
 
-                if key == Key::Space {
-                    events.push(Event::Text(String::from(" ")));
-                } else if key == Key::V && mods.ctrl {
+                if key == Key::V && mods.ctrl {
                     if let Some(clipboard) = get_clipboard_text() {
                         events.push(Event::Text(clipboard));
                     }
@@ -177,6 +181,62 @@ pub fn process(input: &mut RawInput, zoom_factor: f32, umsg: u32, wparam: usize,
         _ => InputResult::Unknown,
     }
 }
+
+pub fn process_ime_sync(hwnd: HWND, umsg: u32, lparam: isize) -> (bool, Option<String>, Option<String>) {
+    let mut is_ime = false;
+    let mut commit = None;
+    let mut preedit = None;
+
+    match umsg {
+        WM_IME_STARTCOMPOSITION => {
+            is_ime = true;
+        }
+        WM_IME_ENDCOMPOSITION => {
+            is_ime = true;
+            preedit = Some(String::new());
+        }
+        WM_IME_COMPOSITION => {
+            is_ime = true;
+            unsafe {
+                let himc = ImmGetContext(hwnd);
+                if himc.0 != std::ptr::null_mut() {
+                    if (lparam as u32 & GCS_RESULTSTR.0) != 0 {
+                        let size = ImmGetCompositionStringW(himc, GCS_RESULTSTR, None, 0);
+                        if size > 0 {
+                            let mut buf = vec![0u8; size as usize];
+                            ImmGetCompositionStringW(himc, GCS_RESULTSTR, Some(buf.as_mut_ptr() as _), size as u32);
+                            let utf16_slice = std::slice::from_raw_parts(buf.as_ptr() as *const u16, size as usize / 2);
+                            if let Ok(s) = String::from_utf16(utf16_slice) {
+                                commit = Some(s);
+                            }
+                        }
+                    }
+                    if (lparam as u32 & GCS_COMPSTR.0) != 0 {
+                        let size = ImmGetCompositionStringW(himc, GCS_COMPSTR, None, 0);
+                        if size > 0 {
+                            let mut buf = vec![0u8; size as usize];
+                            ImmGetCompositionStringW(himc, GCS_COMPSTR, Some(buf.as_mut_ptr() as _), size as u32);
+                            let utf16_slice = std::slice::from_raw_parts(buf.as_ptr() as *const u16, size as usize / 2);
+                            if let Ok(s) = String::from_utf16(utf16_slice) {
+                                preedit = Some(s);
+                            }
+                        } else {
+                            preedit = Some(String::new());
+                        }
+                    } else if commit.is_some() {
+                        preedit = Some(String::new());
+                    }
+                    let _ = ImmReleaseContext(hwnd, himc);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    (is_ime, commit, preedit)
+}
+
+
 
 pub fn is_handled_msg(umsg: u32) -> bool {
     match umsg {

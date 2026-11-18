@@ -1,14 +1,15 @@
 <img align="left" width="80" height="80" src="assets/icon.png">
 
 # Hachimi Edge
-
-English | [简体中文](README-zh_cn.md) | [繁體中文](README-zh_tw.md)
+ 
+English | [简体中文](README-zh_cn.md) | [繁體中文](README-zh_tw.md) | [Filipino](README-fil.md) | [한국어](README-ko.md) | [Русский](README-ru.md)
 
 [![Discord server](https://dcbadge.limes.pink/api/server/https://discord.gg/YjBgmuqqYr)](https://discord.gg/YjBgmuqqYr)
 
 Game enhancement and translation mod for UM:PD.
 
-<img height="400" src="assets/screenshot.jpg">
+<img width="100%" height="100%" src="assets/screenshot-1.png">
+<img width="100%" height="100%" src="assets/screenshot-2.png">
 
 # ⚠️ Please don't link to this repo or Hachimi's website
 We understand that you want to help people install Hachimi and have a better experience playing the game. However, this project is inherently against the game's TOS and The Game Developer most definitely wants it gone if they were ever to learn about it.

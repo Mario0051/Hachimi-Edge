@@ -1,14 +1,14 @@
-use std::{collections::HashSet, fs, io::{Read, Write, Cursor}, path::{Path, PathBuf}, sync::{atomic::{self, AtomicUsize, AtomicBool}, mpsc, Arc, Mutex}, thread, cmp::max};
+use std::{collections::HashSet, fs, io::{Read, Write, Cursor}, path::{Path, PathBuf}, sync::{atomic::{self, AtomicUsize, AtomicBool, AtomicU64}, Arc, Mutex}, thread, cmp::{min, max}};
 
 use arc_swap::ArcSwap;
+use crossbeam_channel::unbounded;
 use fnv::FnvHashMap;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
-use size::Size;
+use size::{Base, Size};
 use thread_priority::{ThreadBuilderExt, ThreadPriority};
 
-use crate::core::game::Region;
-use super::{gui::SimpleYesNoDialog, hachimi::LocalizedData, http::{self, ureq_config, AsyncRequest}, utils, Error, Gui, Hachimi};
+use super::{gui::{NotificationGuard, SimpleYesNoDialog, TranslationRepoUpdateWindow}, hachimi::LocalizedData, http::{self, ureq_config, AsyncRequest}, utils, Error, Gui, Hachimi};
 use once_cell::sync::Lazy;
 
 #[derive(Deserialize)]
@@ -18,9 +18,15 @@ pub struct RepoInfo {
     pub short_desc: Option<String>,
     #[serde(default)]
     pub language: Option<String>,
-    #[serde(default)]
-    pub region: Region
+    #[serde(default = "default_region")]
+    pub region: String
 }
+
+fn default_region() -> String { "Japan".to_owned() }
+
+static SYS_LOCALE: Lazy<String> = Lazy::new(|| {
+    sys_locale::get_locale().as_deref().unwrap_or("en").to_lowercase()
+});
 
 impl RepoInfo {
     pub fn is_recommended(&self, current_lang_str: &str) -> bool {
@@ -32,8 +38,104 @@ impl RepoInfo {
             return true;
         }
 
-        let sys = sys_locale::get_locale().as_deref().unwrap_or("en").to_lowercase();
-        repo_tag.starts_with(&sys) || sys.starts_with(&repo_tag)
+        let sys = &*SYS_LOCALE;
+        repo_tag.starts_with(&*sys) || sys.starts_with(&repo_tag)
+    }
+}
+
+// localized_data/info.json
+#[derive(Deserialize, Clone, Default)]
+pub struct LocalRepoInfo {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub changelog_url: String,
+    #[serde(default)]
+    pub homepage: String,
+    #[serde(default)]
+    pub links: Vec<[String; 2]>,
+    #[serde(default)]
+    pub maintainer: String,
+    #[serde(default)]
+    pub contributors: serde_json::Value,
+    #[serde(default)]
+    pub language: String,
+}
+
+impl LocalRepoInfo {
+    pub fn load(repo_id: u32) -> Result<Option<Self>, Error> {
+        let repo_dir = Hachimi::instance().get_repo_dir(repo_id);
+        let info_path = repo_dir.join("info.json");
+
+        if !info_path.exists() {
+            return Ok(None);
+        }
+
+        let json = fs::read_to_string(info_path)?;
+        let info = serde_json::from_str(&json)?;
+
+        Ok(info)
+    }
+
+    pub fn load_active() -> Result<Option<Self>, Error> {
+        let id = Hachimi::instance()
+            .config
+            .load()
+            .selected_tl_repo_id
+            .ok_or_else(|| Error::RuntimeError("No active translation repository selected".to_string()))?;
+
+        Self::load(id)
+    }
+
+    pub fn format_contributors(&self) -> Option<String> {
+        match &self.contributors {
+            serde_json::Value::Array(arr) => {
+                let names: Vec<String> = arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                if names.is_empty() { None } else { Some(names.join(", ")) }
+            }
+            serde_json::Value::String(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn is_contributors_txt_url(&self) -> bool {
+        if let serde_json::Value::String(s) = &self.contributors {
+            (s.starts_with("http://") || s.starts_with("https://")) && s.ends_with(".txt")
+        } else {
+            false
+        }
+    }
+
+    pub fn is_contributors_url(&self) -> bool {
+        if let serde_json::Value::String(s) = &self.contributors {
+            (s.starts_with("http://") || s.starts_with("https://")) && !s.ends_with(".txt")
+        } else {
+            false
+        }
+    }
+
+    pub fn is_valid_changelog_url(&self) -> bool {
+        if self.changelog_url.is_empty() {
+            return false;
+        }
+        let lower = self.changelog_url.to_lowercase();
+        lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".markdown")
+    }
+
+    pub fn is_txt_changelog(&self) -> bool {
+        !self.changelog_url.is_empty() && self.changelog_url.to_lowercase().ends_with(".txt")
+    }
+
+    pub fn is_markdown_changelog(&self) -> bool {
+        if self.changelog_url.is_empty() {
+            return false;
+        }
+        let lower = self.changelog_url.to_lowercase();
+        lower.ends_with(".md") || lower.ends_with(".markdown")
     }
 }
 
@@ -76,7 +178,7 @@ impl RepoFile {
     fn verify_integrity(&self, full_path: &Path) -> bool {
         let Ok(mut file) = fs::File::open(full_path) else { return false };
         let mut hasher = blake3::Hasher::new();
-        let mut buffer = vec![0u8; 8192];
+        let mut buffer = [0u8; 8192];
 
         while let Ok(n) = file.read(&mut buffer) {
             if n == 0 { break; }
@@ -97,49 +199,63 @@ struct UpdateInfo {
     cached_files: FnvHashMap<String, String>, // from repo cache
     size: usize,
     // New fields for better user communication, idk why it complains about these never being read
-    #[allow(dead_code)]
     update_size: usize,      // Size of changed files only
     #[allow(dead_code)]
     total_size: usize,       // Total size of all files (for ZIP downloads)
     will_use_zip: bool,      // Whether ZIP download will be used
-    modifies_atlas: bool     // Whether file updates include atlases
+    modifies_atlas: bool,     // Whether file updates include atlases
+    index_etag: Option<String>,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum UpdatePhase {
+    #[default]
+    Checking,
+    Downloading,
+    Extracting
 }
 
 #[derive(Default, Clone)]
 pub struct UpdateProgress {
     pub current: usize,
-    pub total: usize
+    pub total: usize,
+    pub phase: UpdatePhase
 }
 
 impl UpdateProgress {
-    pub fn new(current: usize, total: usize) -> UpdateProgress {
+    pub fn new(current: usize, total: usize, phase: UpdatePhase) -> UpdateProgress {
         UpdateProgress {
             current,
-            total
+            total,
+            phase
         }
     }
 }
 
-const REPO_CACHE_FILENAME: &str = ".tl_repo_cache";
+// const REPO_CACHE_FILENAME: &str = ".tl_repo_cache";
 #[derive(Serialize, Deserialize, Default)]
 struct RepoCache {
     base_url: String,
+    #[serde(default)]
+    index_etag: Option<String>,
     files: FnvHashMap<String, String> // path: hash
 }
-const REPO_EXCLUDES_FILENAME: &str = "excludes.txt";
+pub const REPO_EXCLUDES_FILENAME: &str = "excludes.txt";
 
 #[derive(Default)]
 pub struct Updater {
     update_check_mutex: Mutex<()>,
+    run_mutex: Mutex<()>,
     new_update: ArcSwap<Option<UpdateInfo>>,
-    progress: ArcSwap<Option<UpdateProgress>>
+    progress: ArcSwap<Option<UpdateProgress>>,
+    last_progress_ms: AtomicU64,
+    skipped_etag: Mutex<Option<String>>
 }
 
-const LOCALIZED_DATA_DIR: &str = "localized_data";
 const CHUNK_SIZE: usize = 8192; // 8KiB
 static NUM_THREADS: Lazy<usize> = Lazy::new(|| {
     let parallelism = thread::available_parallelism().unwrap().get();
-    max(1, parallelism / 2)
+    max(1, min(parallelism / 2, 4))
 });
 
 const INCREMENTAL_UPDATE_LIMIT_GITHUB: usize = 55;
@@ -165,12 +281,106 @@ impl DownloadJob {
     }
 }
 
+// 60fps time based throttle for the update progress bar
+fn store_progress(
+    progress: &ArcSwap<Option<UpdateProgress>>,
+    last_progress_ms: &AtomicU64,
+    current: usize,
+    total: usize,
+    phase: UpdatePhase
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let last = last_progress_ms.load(atomic::Ordering::Relaxed);
+    if current == total || now.saturating_sub(last) >= 16 {
+        last_progress_ms.store(now, atomic::Ordering::Relaxed);
+        progress.store(Arc::new(Some(UpdateProgress::new(current, total, phase))));
+    }
+}
+
+/// RAII guard that ensures a temporary ZIP file is cleaned up, even if the function returns early via `?` or panics
+struct ZipCleanupGuard<'a>(&'a Path);
+impl Drop for ZipCleanupGuard<'_> {
+    fn drop(&mut self) {
+        if self.0.exists() {
+            if let Err(e) = fs::remove_file(self.0) {
+                error!("Failed to clean up temporary ZIP file '{}': {}", self.0.display(), e);
+            }
+        }
+    }
+}
+
+fn check_available_disk_space(_path: &Path, required_bytes: u64) -> Result<(), Error> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        let wide: Vec<u16> = _path.as_os_str().encode_wide().chain(std::iter::once(0u16)).collect();
+        let mut free_bytes: u64 = 0;
+
+        extern "system" {
+            fn GetDiskFreeSpaceExW(
+                lpDirectoryName: *const u16,
+                lpFreeBytesAvailableToCaller: *mut u64,
+                lpTotalNumberOfBytes: *mut u64,
+                lpTotalNumberOfFreeBytes: *mut u64,
+            ) -> i32;
+        }
+
+        // SAFETY: GetDiskFreeSpaceExW is a stable Windows API since Windows 2000
+        let result = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_bytes,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+
+        if result != 0 && free_bytes < required_bytes {
+            return Err(Error::OutOfDiskSpace);
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        if let Some(free_bytes) = crate::android::utils::get_available_disk_space() {
+            if free_bytes < required_bytes {
+                return Err(Error::OutOfDiskSpace);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl Updater {
-    pub fn check_for_updates(self: Arc<Self>, pedantic: bool) {
+    pub fn skip_update(&self, etag: Option<String>) {
+        *self.skipped_etag.lock().unwrap() = etag;
+    }
+
+    pub fn has_pending_update(&self) -> bool {
+        self.new_update.load().is_some()
+    }
+
+    pub fn clear_pending_update(&self) {
+        self.new_update.store(Arc::new(None));
+    }
+
+    pub fn is_updating(&self) -> bool {
+        self.progress.load().is_some()
+    }
+
+    pub fn check_for_updates(self: Arc<Self>, pedantic: bool, silent: bool) {
         std::thread::spawn(move || {
-            if let Err(e) = self.check_for_updates_internal(pedantic) {
+            if let Err(e) = self.check_for_updates_internal(pedantic, silent) {
                 if let Some(mutex) = Gui::instance() {
-                    mutex.lock().unwrap().show_notification(&format!("{}", e));
+                    if !silent {
+                        mutex.lock().unwrap().show_notification(&format!("{}", e));
+                    }
                 }
                 info!("{}", e);
             }
@@ -207,32 +417,132 @@ impl Updater {
         true
     }
 
-    fn check_for_updates_internal(&self, pedantic: bool) -> Result<(), Error> {
+    fn get_repo_cache_path(id: u32) -> PathBuf {
+        Hachimi::instance().get_data_path(format!(".tl_repo_cache_{}", id))
+    }
+
+    fn check_for_updates_internal(&self, pedantic: bool, silent: bool) -> Result<(), Error> {
         // Prevent multiple update checks running at the same time
         let Ok(_guard) = self.update_check_mutex.try_lock() else {
             return Ok(());
         };
+
+        if self.has_pending_update() {
+            return Ok(());
+        }
 
         let hachimi = Hachimi::instance();
         let config = hachimi.config.load();
         let Some(index_url) = &config.translation_repo_index else {
             return Ok(());
         };
-        let ld_dir_path = config.localized_data_dir.as_ref().map(|p| hachimi.get_data_path(p));
 
-        if let Some(mutex) = Gui::instance() {
-            mutex.lock().unwrap().show_notification(&t!("notification.checking_for_tl_updates"));
-        }
+        let checking_notif_id = if !silent {
+            if let Some(mutex) = Gui::instance() {
+                Some(mutex.lock().unwrap().show_persistent_notification(&t!("notification.checking_for_tl_updates")))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let _guard = checking_notif_id.map(NotificationGuard);
 
-        let index: RepoIndex = http::get_json(index_url)?;
+        let repo_id = if let Some(id) = config.selected_tl_repo_id {
+            id
+        } else {
+            let mut manager = hachimi.tl_repo_manager.lock().unwrap();
+            let repos_path = hachimi.get_data_path(".tl_repos");
+            let id = if let Some(existing_id) = manager.find_by_index(index_url) {
+                existing_id
+            } else {
+                let new_id = manager.add(index_url.clone());
+                manager.save(&repos_path)?;
+                new_id
+            };
 
-        let cache_path = hachimi.get_data_path(REPO_CACHE_FILENAME);
+            let mut new_config = (**config).clone();
+            new_config.selected_tl_repo_id = Some(id);
+            hachimi.save_and_reload_config(new_config)?;
+            id
+        };
+
+        let config = hachimi.config.load(); // in case repo id was migrated
+        let ld_dir_path = hachimi.get_active_tl_dir();
+
+        let cache_path = Self::get_repo_cache_path(repo_id);
         let repo_cache = if fs::metadata(&cache_path).is_ok() {
             let json = fs::read_to_string(&cache_path)?;
-            serde_json::from_str(&json)?
+            serde_json::from_str(&json).unwrap_or_default()
         }
         else {
             RepoCache::default()
+        };
+
+        let mut new_etag: Option<String> = None;
+
+        // conditional GET: send If-None-Match with the current best ETag.
+        // server replies 304 if nothing changed, 200 + body if it has.
+        let etag_for_request = if !pedantic && config.etag_translation_updates {
+            repo_cache.index_etag.clone()
+                .or_else(|| self.skipped_etag.lock().unwrap().clone())
+        } else {
+            None
+        };
+
+        let mut request = ureq::agent().get(index_url);
+        if let Some(etag) = &etag_for_request {
+            request = request.header("If-None-Match", etag);
+        }
+
+        let index: RepoIndex = match request.call() {
+            Ok(res) => {
+                if let Some(etag_val) = res.headers().get("ETag") {
+                    if let Ok(etag_str) = etag_val.to_str() {
+                        let etag_string = etag_str.to_string();
+
+                        // user previously dismissed this exact version
+                        if !pedantic && config.etag_translation_updates {
+                            if let Some(skipped) = &*self.skipped_etag.lock().unwrap() {
+                                if skipped == &etag_string {
+                                    debug!("Server ETag matches the skipped ETag. Ignoring update.");
+                                    return Ok(());
+                                }
+                            }
+                        }
+
+                        // fallback for servers that ignore If-None-Match
+                        if !pedantic && config.etag_translation_updates {
+                            if let Some(cached) = &repo_cache.index_etag {
+                                if cached == &etag_string {
+                                    info!("Server ETag matches cached ETag (server may not support conditional requests). No translation updates available.");
+                                    if !silent {
+                                        if let Some(mutex) = Gui::instance() {
+                                            mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+                                        }
+                                    }
+                                    return Ok(());
+                                }
+                            }
+                        }
+
+                        new_etag = Some(etag_string);
+                    }
+                }
+                serde_json::from_reader(res.into_body().into_reader())?
+            }
+            Err(ureq::Error::StatusCode(code)) if code == ureq::http::StatusCode::NOT_MODIFIED => {
+                info!("Server returned 304 Not Modified. No translation updates available.");
+                if !silent {
+                    if let Some(mutex) = Gui::instance() {
+                        mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
         };
 
         let excludes_path = hachimi.get_data_path(REPO_EXCLUDES_FILENAME);
@@ -252,57 +562,89 @@ impl Updater {
         let mut update_files: Vec<RepoFile> = Vec::new();
         let mut update_size: usize = 0;
         let mut total_size: usize = 0;
-        for file in index.files.iter() {
-            if file.path.contains("..") || Path::new(&file.path).has_root() {
-                warn!("File path '{}' sanitized", file.path);
-                continue;
+
+        let total_files = index.files.len();
+        if let Some(mutex) = Gui::instance() {
+            mutex.lock().unwrap().update_progress_visible = true;
+        }
+
+        if is_new_repo {
+            // skip all filesystem checks, the directory will be wiped anyway
+            for (i, file) in index.files.iter().enumerate() {
+                store_progress(&self.progress, &self.last_progress_ms, i, total_files, UpdatePhase::Checking);
+
+                if file.path.contains("..") || Path::new(&file.path).has_root() {
+                    warn!("File path '{}' sanitized", file.path);
+                    continue;
+                }
+                if file.path.contains("/atlas/") && !modifies_atlas {
+                    modifies_atlas = true;
+                }
+                update_files.push(file.clone());
+                update_size += file.size;
+                total_size += file.size;
             }
+        } else {
+            for (i, file) in index.files.iter().enumerate() {
+                store_progress(&self.progress, &self.last_progress_ms, i, total_files, UpdatePhase::Checking);
 
-            let path = ld_dir_path.as_ref().map(|p| p.join(&file.path));
-            let exists = path.as_ref().map(|p| p.is_file()).unwrap_or(false);
+                if file.path.contains("..") || Path::new(&file.path).has_root() {
+                    warn!("File path '{}' sanitized", file.path);
+                    continue;
+                }
 
-            let updated = if is_new_repo {
-                // redownload every single file because the directory will be deleted
-                true
-            } else if !pedantic && exists && excludes.contains(&file.path) {
-                // skip excluded file unless pedantic update or the file doesn't exist in the system
-                false
-            } else if let Some(hash) = repo_cache.files.get(&file.path) {
-                // lazy auto update, cached hash and repo hash matches. ignored during pedantic
-                if !pedantic && config.lazy_translation_updates && hash == &file.hash {
+                let path = ld_dir_path.as_ref().map(|p| p.join(&file.path));
+                let exists = path.as_ref().map(|p| p.is_file()).unwrap_or(false);
+
+                let excluded = excludes.iter().any(|exc| {
+                    if file.path == *exc {
+                        return true;
+                    }
+                    let exc_dir = exc.trim_end_matches('/');
+                    file.path.starts_with(&format!("{}/", exc_dir))
+                });
+
+                let updated = if !pedantic && exists && excluded {
+                    // skip excluded file unless pedantic update or the file doesn't exist in the system
                     false
-                } else if let Some(path) = path { // get path or force download if path is invalid
-                    // file doesn't exist -> download
-                    if !exists {
-                        true
-                    } else {
-                        if hash != &file.hash {
+                } else if let Some(hash) = repo_cache.files.get(&file.path) {
+                    // lazy auto update, cached hash and repo hash matches. ignored during pedantic
+                    if !pedantic && config.lazy_translation_updates && hash == &file.hash {
+                        false
+                    } else if let Some(path) = path {
+                        // file doesn't exist -> download
+                        if !exists {
+                            true
+                        } else if hash != &file.hash {
                             true // index hash changed -> update
                         } else if fs::metadata(&path).map(|m| m.len() as usize != file.size).unwrap_or(true) {
                             true // size mismatch -> redownload
                         } else if pedantic {
-                            // full blake3 integrity check if user requested pedantic update
-                            !file.verify_integrity(&path)
+                            !file.verify_integrity(&path) // full blake3 integrity check if user requested pedantic update
                         } else {
                             false // everything matches -> skip
                         }
+                    } else {
+                        true // path invalid -> download
                     }
                 } else {
-                    true // path invalid -> download
-                }
-            } else {
-                // file doesn't exist in cache at all -> download it
-                true
-            };
+                    true // file doesn't exist in cache at all -> download it
+                };
 
-            if updated {
-                update_files.push(file.clone());
-                update_size += file.size;
-                if file.path.contains("/atlas/") {
-                    modifies_atlas = true;
+                if updated {
+                    update_files.push(file.clone());
+                    update_size += file.size;
+                    if file.path.contains("/atlas/") && !modifies_atlas {
+                        modifies_atlas = true;
+                    }
                 }
+                total_size += file.size;
             }
-            total_size += file.size;
+        }
+
+        self.progress.store(Arc::new(None));
+        if let Some(mutex) = Gui::instance() {
+            mutex.lock().unwrap().update_progress_visible = false;
         }
 
         if !update_files.is_empty() {
@@ -329,10 +671,18 @@ impl Updater {
                 update_size,
                 total_size,
                 will_use_zip,
-                modifies_atlas
+                modifies_atlas,
+                index_etag: new_etag.clone(),
             })));
 
-            if let Some(mutex) = Gui::instance() {
+            if silent {
+                // don't auto-apply while another update is already in progress
+                if self.progress.load().is_some() {
+                    info!("Silent update skipped, another update is already in progress.");
+                } else {
+                    Hachimi::instance().tl_updater.clone().run();
+                }
+            } else if let Some(mutex) = Gui::instance() {
                 // Determine the dialog message based on download strategy
                 let dialog_message = if will_use_zip && update_size > 0 {
                     let size_ratio = total_size as f64 / update_size.max(1) as f64;
@@ -340,38 +690,78 @@ impl Updater {
                     if size_ratio >= ZIP_SIZE_WARNING_RATIO {
                         // Warn user about larger ZIP download
                         debug!(
-                            "ZIP download warning: changed={} MB, total={} MB, ratio={:.2}x",
-                            update_size / (1024 * 1024),
-                            total_size / (1024 * 1024),
+                            "ZIP download warning: changed={}, total={}, ratio={:.2}x",
+                            Size::from_bytes(update_size).format().with_base(Base::Base10),
+                            Size::from_bytes(total_size).format().with_base(Base::Base10),
                             size_ratio
                         );
 
                         t!(
                             "tl_update_dialog.content_zip_warning",
-                            changed_size = Size::from_bytes(update_size),
-                            download_size = Size::from_bytes(total_size)
+                            changed_size = Size::from_bytes(update_size).format().with_base(Base::Base10),
+                            download_size = Size::from_bytes(total_size).format().with_base(Base::Base10)
                         )
                     } else {
                         // ZIP is being used but size difference is not significant
-                        t!("tl_update_dialog.content", size = Size::from_bytes(actual_download_size))
+                        t!("tl_update_dialog.content", size = Size::from_bytes(actual_download_size).format().with_base(Base::Base10))
                     }
                 } else {
                     // Incremental update or no warning needed
-                    t!("tl_update_dialog.content", size = Size::from_bytes(actual_download_size))
+                    t!("tl_update_dialog.content", size = Size::from_bytes(actual_download_size).format().with_base(Base::Base10))
                 };
 
-                mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
-                    &t!("tl_update_dialog.title"),
-                    &dialog_message,
-                    |ok| {
-                        if !ok { return; }
-                        Hachimi::instance().tl_updater.clone().run();
-                    }
-                )));
+                let updater = Hachimi::instance().tl_updater.clone();
+                let etag_to_skip = new_etag.clone();
+
+                // Check if the active repo has a valid changelog URL
+                let repo_info = LocalRepoInfo::load(repo_id)
+                    .ok()
+                    .flatten()
+                    .filter(|info| info.is_valid_changelog_url());
+
+                if let Some(info) = repo_info {
+                    mutex.lock().unwrap().show_window(Box::new(TranslationRepoUpdateWindow::new(
+                        &t!("tl_update_dialog.title"),
+                        &dialog_message,
+                        info.changelog_url.as_str(),
+                        info.is_markdown_changelog(),
+                        move |ok| {
+                            if !ok {
+                                updater.skip_update(etag_to_skip);
+                                updater.clear_pending_update();
+                                return;
+                            }
+                            updater.run();
+                        }
+                    )));
+                } else {
+                    mutex.lock().unwrap().show_window(Box::new(SimpleYesNoDialog::new(
+                        &t!("tl_update_dialog.title"),
+                        &dialog_message,
+                        move |ok| {
+                            if !ok {
+                                updater.skip_update(etag_to_skip);
+                                updater.clear_pending_update();
+                                return;
+                            }
+                            updater.run();
+                        }
+                    )));
+                }
             }
         }
-        else if let Some(mutex) = Gui::instance() {
-            mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+        else {
+            if let Some(etag) = new_etag {
+                let mut updated_cache = repo_cache;
+                updated_cache.index_etag = Some(etag);
+                let _ = utils::write_json_file(&updated_cache, &cache_path);
+            }
+
+            if !silent {
+                if let Some(mutex) = Gui::instance() {
+                    mutex.lock().unwrap().show_notification(&t!("notification.no_tl_updates"));
+                }
+            }
         }
 
         Ok(())
@@ -385,6 +775,7 @@ impl Updater {
                 if let Err(e) = self.clone().run_internal() {
                     error!("{}", e);
                     self.progress.store(Arc::new(None));
+                    Hachimi::instance().load_localized_data();
                     if let Some(mutex) = Gui::instance() {
                         mutex.lock().unwrap().show_notification(&t!("notification.update_failed", reason = e.to_string()));
                     }
@@ -409,12 +800,17 @@ impl Updater {
     }
 
     fn run_internal(self: Arc<Self>) -> Result<(), Error> {
-        let Some(update_info) = (**self.new_update.load()).clone() else {
+        let Ok(_run_guard) = self.run_mutex.try_lock() else {
+            info!("Update already in progress, skipping.");
+            return Ok(());
+        };
+        let Some(mut update_info) = (**self.new_update.load()).clone() else {
             return Ok(());
         };
         self.new_update.store(Arc::new(None));
+        self.last_progress_ms.store(0, atomic::Ordering::Relaxed);
 
-        self.progress.store(Arc::new(Some(UpdateProgress::new(0, update_info.size))));
+        self.progress.store(Arc::new(Some(UpdateProgress::new(0, update_info.size, UpdatePhase::Downloading))));
         if let Some(mutex) = Gui::instance() {
             mutex.lock().unwrap().update_progress_visible = true;
         }
@@ -423,7 +819,12 @@ impl Updater {
         let hachimi = Hachimi::instance();
         hachimi.localized_data.store(Arc::new(LocalizedData::default()));
 
-        let localized_data_dir = hachimi.get_data_path(LOCALIZED_DATA_DIR);
+        let localized_data_dir = match hachimi.get_active_tl_dir() {
+            Some(v) => v,
+            None => return Err(Error::RuntimeError("Active TL repo directory not set.".to_owned()))
+        };
+        let disk_check_path = localized_data_dir.parent().unwrap_or(Path::new("."));
+        check_available_disk_space(disk_check_path, update_info.size as u64)?;
 
         if update_info.is_new_repo {
             Self::create_dir(&localized_data_dir, true)?;
@@ -432,7 +833,7 @@ impl Updater {
         }
 
         // Download the files - use the pre-determined strategy
-        let cached_files = Arc::new(Mutex::new(update_info.cached_files.clone()));
+        let cached_files = Arc::new(Mutex::new(std::mem::take(&mut update_info.cached_files)));
         let error_count = if update_info.will_use_zip {
             self.clone().download_zip(&update_info, &localized_data_dir, cached_files.clone())
         }
@@ -440,13 +841,7 @@ impl Updater {
             self.clone().download_incremental(&update_info, &localized_data_dir, cached_files.clone())
         }?;
 
-        // Modify the config if needed
         let config = hachimi.config.load();
-        if config.localized_data_dir.is_none() {
-            let mut new_config = (**config).clone();
-            new_config.localized_data_dir = Some(LOCALIZED_DATA_DIR.to_owned());
-            hachimi.save_and_reload_config(new_config)?;
-        }
         if config.apply_atlas_workaround && (update_info.modifies_atlas || update_info.will_use_zip) {
             let mut new_config = (**config).clone();
             new_config.apply_atlas_workaround = false;
@@ -465,10 +860,17 @@ impl Updater {
         // Save the repo cache (done last so if any of the previous fails, the entire update would be voided)
         let repo_cache = RepoCache {
             base_url: update_info.base_url.clone(),
+            index_etag: update_info.index_etag.clone(),
             files: cached_files.lock().unwrap().clone()
         };
-        let cache_path = hachimi.get_data_path(REPO_CACHE_FILENAME);
+        let repo_id = match hachimi.config.load().selected_tl_repo_id {
+            Some(v) => v,
+            None => return Err(Error::RuntimeError("TL repo ID not set after update".to_owned()))
+        };
+        let cache_path = Self::get_repo_cache_path(repo_id);
         utils::write_json_file(&repo_cache, &cache_path)?;
+
+        *self.skipped_etag.lock().unwrap() = None;
 
         if let Some(mutex) = Gui::instance() {
             let mut gui = mutex.lock().unwrap();
@@ -494,8 +896,7 @@ impl Updater {
 
         let shared_agent: ureq::Agent = ureq::Agent::new_with_config(ureq_config());
 
-        let (sender, receiver) = mpsc::channel::<RepoFile>();
-        let receiver = Arc::new(Mutex::new(receiver));
+        let (sender, receiver) = unbounded::<RepoFile>();
 
         let mut handles = Vec::with_capacity(*NUM_THREADS);
         for _ in 0..*NUM_THREADS {
@@ -507,7 +908,7 @@ impl Updater {
             let non_fatal_error_count_clone = Arc::clone(&non_fatal_error_count);
             let fatal_error_clone = Arc::clone(&fatal_error);
             let stop_signal_clone = Arc::clone(&stop_signal);
-            let receiver_clone = Arc::clone(&receiver);
+            let receiver_clone = receiver.clone();
 
             let thread_agent = shared_agent.clone();
 
@@ -520,7 +921,7 @@ impl Updater {
                     }
                     let mut job = DownloadJob::new(thread_agent);
 
-                    while let Ok(repo_file) = receiver_clone.lock().unwrap().recv() {
+                    while let Ok(repo_file) = receiver_clone.recv() {
                         if stop_signal_clone.load(atomic::Ordering::Relaxed) { break; }
 
                         let file_path = repo_file.get_fs_path(&localized_data_dir_clone);
@@ -530,20 +931,36 @@ impl Updater {
                             if let Some(parent) = Path::new(&file_path).parent() {
                                 Self::create_dir(parent, false)?;
                             }
-                            let mut file = fs::File::create(&file_path)?;
-                            let res = job.agent.get(&url).call()?;
+                            let mut part_path = file_path.clone().into_os_string();
+                            part_path.push(".part");
+                            let part_path = PathBuf::from(part_path);
 
-                            http::download_file_buffered(res, &mut file, &mut job.buffer, |bytes| {
-                                job.hasher.update(bytes);
-                                let prev_size = current_bytes_clone.fetch_add(bytes.len(), atomic::Ordering::SeqCst);
-                                updater.progress.store(Arc::new(Some(UpdateProgress::new(prev_size + bytes.len(), total_size))));
-                            })?;
+                            let download = (|| -> Result<(), Error> {
+                                let mut file = fs::File::create(&part_path)?;
+                                let res = job.agent.get(&url).call()?;
+
+                                http::download_file_buffered(res, &mut file, &mut job.buffer, |bytes| {
+                                    job.hasher.update(bytes);
+                                    let prev_size = current_bytes_clone.fetch_add(bytes.len(), atomic::Ordering::Relaxed);
+                                    store_progress(&updater.progress, &updater.last_progress_ms, prev_size + bytes.len(), total_size, UpdatePhase::Downloading);
+                                })
+                            })();
 
                             let hash = job.hasher.finalize().to_hex().to_string();
+                            job.hasher.reset();
+
+                            if let Err(e) = download {
+                                let _ = fs::remove_file(&part_path);
+                                return Err(e);
+                            }
                             if hash != repo_file.hash {
+                                let _ = fs::remove_file(&part_path);
                                 return Err(Error::FileHashMismatch(file_path.to_str().unwrap_or("").to_string()));
                             }
-                            job.hasher.reset();
+                            if let Err(e) = fs::rename(&part_path, &file_path) {
+                                let _ = fs::remove_file(&part_path);
+                                return Err(e.into());
+                            }
                             Ok(hash)
                         })();
 
@@ -559,7 +976,7 @@ impl Updater {
                                     return;
                                 } else {
                                     error!("Non-fatal error during incremental download: {}", e);
-                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
+                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
                                 }
                             }
                         }
@@ -591,12 +1008,13 @@ impl Updater {
         cached_files: Arc<Mutex<FnvHashMap<String, String>>>
     ) -> Result<usize, Error> {
         let zip_path = localized_data_dir.join(".tmp.zip");
+        let _zip_cleanup = ZipCleanupGuard(&zip_path);
         // idk compiler going monkey mode unless i add this
         #[allow(unused_assignments)]
         let mut error_count = 0;
 
         {
-            let total_size_header = ureq::agent().head(&update_info.zip_url).call()
+            let total_size_header = ureq::Agent::new_with_config(ureq_config()).head(&update_info.zip_url).call()
                 .ok()
                 .and_then(|res| {
                     res.headers()
@@ -623,7 +1041,7 @@ impl Updater {
             let progress_bar = Arc::new(move |bytes_read: usize| {
                 let prev_size = downloaded_clone.fetch_add(bytes_read, atomic::Ordering::Relaxed);
                 let current = prev_size + bytes_read;
-                self_clone.progress.store(Arc::new(Some(UpdateProgress::new(current, progress_total))));
+                store_progress(&self_clone.progress, &self_clone.last_progress_ms, current, progress_total, UpdatePhase::Downloading);
             });
 
             http::download_file_parallel(
@@ -642,16 +1060,24 @@ impl Updater {
             );
 
             let zip_file = fs::File::open(&zip_path)?;
+            let file_len = zip_file.metadata()?.len();
+            if file_len == 0 {
+                return Err(Error::RuntimeError("Downloaded ZIP file is empty".to_string()));
+            }
             let mmap = Arc::new(unsafe { memmap2::Mmap::map(&zip_file)? });
+            if mmap.is_empty() {
+                return Err(Error::RuntimeError("Failed to memory-map the downloaded ZIP file".to_string()));
+            }
 
-            let total_size = update_info.size;
+            let zip_len = zip::ZipArchive::new(Cursor::new(&mmap[..]))?.len();
+
+            let total_size = update_info.update_size;
             let current_bytes = Arc::new(AtomicUsize::new(0));
             let non_fatal_error_count = Arc::new(AtomicUsize::new(0));
             let fatal_error = Arc::new(Mutex::new(None::<Error>));
             let stop_signal = Arc::new(AtomicBool::new(false));
 
-            let (sender, receiver) = mpsc::channel::<usize>();
-            let receiver = Arc::new(Mutex::new(receiver));
+            let (sender, receiver) = unbounded::<usize>();
             let mut handles = Vec::with_capacity(*NUM_THREADS);
 
             for _ in 0..*NUM_THREADS {
@@ -664,7 +1090,7 @@ impl Updater {
                 let non_fatal_error_count_clone = Arc::clone(&non_fatal_error_count);
                 let fatal_error_clone = Arc::clone(&fatal_error);
                 let stop_signal_clone = Arc::clone(&stop_signal);
-                let receiver_clone = Arc::clone(&receiver);
+                let receiver_clone = receiver.clone();
 
                 let handle = thread::Builder::new()
                     .name("zip_extractor".into())
@@ -682,18 +1108,26 @@ impl Updater {
                         let mut buffer = vec![0u8; CHUNK_SIZE];
                         let mut hasher = blake3::Hasher::new();
 
-                        while let Ok(i) = receiver_clone.lock().unwrap().recv() {
+                        while let Ok(i) = receiver_clone.recv() {
                             if stop_signal_clone.load(atomic::Ordering::Relaxed) { break; }
 
                             let mut zip_entry = match archive.by_index(i) {
                                 Ok(entry) => entry,
                                 Err(_) => {
-                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
+                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
                                     continue;
                                 }
                             };
 
-                            let repo_file = match files_to_extract_clone.get(zip_entry.name()) {
+                            let entry_name = match zip_entry.name() {
+                                Ok(name) => name,
+                                Err(_) => {
+                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
+                                    continue;
+                                }
+                            };
+
+                            let repo_file = match files_to_extract_clone.get(&*entry_name) {
                                 Some(file) => file.clone(),
                                 None => continue,
                             };
@@ -701,56 +1135,73 @@ impl Updater {
                             let path = repo_file.get_fs_path(&localized_data_dir_clone);
                             if let Some(parent) = path.parent() {
                                 if Self::create_dir(parent, false).is_err() {
-                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
+                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
                                     continue;
                                 }
                             }
 
-                            let mut out_file = match fs::File::create(&path) {
+                            let mut part_path = path.clone().into_os_string();
+                            part_path.push(".part");
+                            let part_path = PathBuf::from(part_path);
+
+                            let mut out_file = match fs::File::create(&part_path) {
                                 Ok(file) => file,
                                 Err(_) => {
-                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
+                                    non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
                                     continue;
                                 }
                             };
 
+                            let mut entry_ok = true;
                             loop {
                                 match zip_entry.read(&mut buffer) {
                                     Ok(0) => break,
                                     Ok(read_bytes) => {
                                         let data_slice = &buffer[..read_bytes];
                                         if out_file.write_all(data_slice).is_err() {
+                                            let _ = fs::remove_file(&part_path);
                                             *fatal_error_clone.lock().unwrap() = Some(Error::OutOfDiskSpace);
                                             stop_signal_clone.store(true, atomic::Ordering::Relaxed);
                                             return;
                                         }
                                         hasher.update(data_slice);
-                                        let prev_size = current_bytes_clone.fetch_add(read_bytes, atomic::Ordering::SeqCst);
-                                        updater.progress.store(Arc::new(Some(UpdateProgress::new(prev_size + read_bytes, total_size))));
+                                        let prev_size = current_bytes_clone.fetch_add(read_bytes, atomic::Ordering::Relaxed);
+                                        store_progress(&updater.progress, &updater.last_progress_ms, prev_size + read_bytes, total_size, UpdatePhase::Extracting);
                                     }
                                     Err(_) => {
-                                        non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::SeqCst);
+                                        non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
+                                        entry_ok = false;
                                         break;
                                     }
                                 }
                             }
 
                             let hash = hasher.finalize().to_hex().to_string();
+                            hasher.reset();
+
+                            if !entry_ok {
+                                let _ = fs::remove_file(&part_path);
+                                continue;
+                            }
                             if hash != repo_file.hash {
                                 let path_str = path.to_str().unwrap_or("").to_string();
+                                let _ = fs::remove_file(&part_path);
                                 *fatal_error_clone.lock().unwrap() = Some(Error::FileHashMismatch(path_str));
                                 stop_signal_clone.store(true, atomic::Ordering::Relaxed);
                                 return;
                             }
+                            if fs::rename(&part_path, &path).is_err() {
+                                let _ = fs::remove_file(&part_path);
+                                non_fatal_error_count_clone.fetch_add(1, atomic::Ordering::Relaxed);
+                                continue;
+                            }
 
                             cached_files_clone.lock().unwrap().insert(repo_file.path.clone(), hash);
-                            hasher.reset();
                         }
                     }).unwrap();
                 handles.push(handle);
             }
 
-            let zip_len = zip::ZipArchive::new(Cursor::new(&mmap[..]))?.len();
             for i in 0..zip_len {
                 if sender.send(i).is_err() { break; }
             }
@@ -774,5 +1225,53 @@ impl Updater {
 
     pub fn progress(&self) -> Option<UpdateProgress> {
         (**self.progress.load()).clone()
+    }
+}
+
+// new tl repo manager
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct RepoList {
+    pub repos: Vec<RepoEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RepoEntry {
+    pub id: u32,
+    pub index: String,
+}
+
+impl RepoList {
+    pub fn load(path: &Path) -> Result<Self, Error> {
+        if path.exists() {
+            let data = fs::read_to_string(path)?;
+            Ok(serde_json::from_str(&data)?)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), Error> {
+        let data = serde_json::to_string_pretty(self)?;
+        fs::write(path, data)?;
+        Ok(())
+    }
+
+    pub fn next_id(&self) -> u32 {
+        self.repos.iter().map(|r| r.id).max().map(|m| m + 1).unwrap_or(1)
+    }
+
+    pub fn add(&mut self, index: String) -> u32 {
+        let id = self.next_id();
+        self.repos.push(RepoEntry { id, index });
+        id
+    }
+
+    pub fn find_by_index(&self, index: &str) -> Option<u32> {
+        self.repos.iter().find(|r| r.index == index).map(|r| r.id)
+    }
+
+    pub fn find_by_id(&self, id: u32) -> Option<&str> {
+        self.repos.iter().find(|r| r.id == id).map(|r| r.index.as_str())
     }
 }

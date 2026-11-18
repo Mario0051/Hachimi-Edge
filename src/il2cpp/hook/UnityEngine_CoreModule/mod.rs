@@ -1,5 +1,5 @@
 pub mod Texture2D;
-mod Resources;
+pub mod Resources;
 pub mod Sprite;
 pub mod Object;
 pub mod Application;
@@ -15,15 +15,20 @@ pub mod UnityAction;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod TouchScreenKeyboard;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub mod TouchScreenKeyboardType;
+#[path = "TouchScreenKeyboardType.rs"]
+mod touch_screen_keyboard_type;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub use touch_screen_keyboard_type::TouchScreenKeyboardType;
 pub mod RectTransform;
 pub mod Transform;
 pub mod RectOffset;
-
+pub mod Camera;
+pub mod Shader;
 #[cfg(target_os = "windows")]
 pub mod QualitySettings;
-#[cfg(target_os = "windows")]
 pub mod Screen;
+pub mod SceneManager;
+pub mod Scene;
 
 pub const HideFlags_DontUnloadUnusedAsset: i32 = 32;
 
@@ -31,6 +36,7 @@ pub const TextureFormat_RGBA32: i32 = 4;
 
 pub const FullScreenMode_ExclusiveFullScreen: i32 = 0;
 pub const FullScreenMode_FullScreenWindow: i32 = 1;
+pub const FullScreenMode_Windowed: i32 = 3;
 
 pub fn init() {
     get_assembly_image_or_return!(image, "UnityEngine.CoreModule.dll");
@@ -52,15 +58,19 @@ pub fn init() {
     RectTransform::init(image);
     Transform::init(image);
     RectOffset::init(image);
+    SceneManager::init(image);
+    Scene::init(image);
+    Camera::init(image);
+    Shader::init(image);
+    Screen::init(image);
+
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         TouchScreenKeyboard::init(image);
-        TouchScreenKeyboardType::init(image);
     }
 
     #[cfg(target_os = "windows")]
     {
         QualitySettings::init(image);
-        Screen::init(image);
     }
 }

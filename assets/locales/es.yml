@@ -4,7 +4,7 @@ windows:
   menu_open_key: "Flecha Derecha"
 
 android:
-  menu_open_key: "Volumen + y Volumen -\n\uf25a o Triple toque arriba a la izquierda"
+  menu_open_key: "Subir y bajar volumen\n\uf25a o triple toque en esquina superior izq."
 
 splash_sub: "\uf015 Pulsa %{open_key_str} para abrir el menú."
 splash_sub_ios: "\uf015 Toca el botón flotante (\uf111) para abrir el menú."
@@ -24,12 +24,28 @@ default: "Por defecto"
 off: "Desactivado"
 on: "Activado"
 enable: "Activar"
+disabled: "Desactivado"
+minutes: "minutos"
 info: "Info"
 warning: "Advertencia"
 confirm_dialog_title: "Confirmar"
 soft_restart_confirm_content: "¿Seguro que quieres realizar un reinicio suave del juego?"
 in_game_browser_confirm_content: "¿Seguro que quieres abrir el navegador del juego?"
 browser_dialog_title: "Navegador"
+bind_key: "Asignar tecla"
+edit: "Editar"
+remove: "Quitar"
+add: "Añadir"
+save_changes: "¿Guardar los cambios?"
+back: "Atrás"
+portrait: "Retrato"
+landscape: "Apaisado"
+reset: "Reiniciar"
+spring: "Primavera"
+summer: "Verano"
+fall: "Otoño"
+winter: "Invierno"
+cherry_blossom: "Sakura"
 
 menu:
   check_for_updates: "\uf0aa Buscar actualizaciones"
@@ -55,13 +71,16 @@ menu:
   danger_zone_warning: "Las siguientes opciones podrían tener efectos adversos en el juego. ¡Úsalas con precaución!"
   soft_restart: "\uf021 Reinicio suave"
   open_in_game_browser: "\uf0ac Abrir navegador en juego"
-  toggle_game_ui: "\uf06e Alternar el UI del juego"
+  toggle_game_ui: "\uf06e Alternar la UI del juego"
   discord_rpc: "Discord RPC"
+  edit_excludes: "\uf040 Editar exclusiones"
+  change_translation_repo: "\uf0c1 Cambiar repositorio de traducción"
 
 notification:
   saved_localize_dump: "Exportado en localize_dump.json"
   config_reloaded: "Configuración recargada."
   config_saved: "Configuración guardada."
+  config_error: "La configuración se ha corrompido. Se usarán los valores por defecto..."
   localized_data_reloaded: "Localización recargada."
   checking_for_tl_updates: "Buscando actualizaciones de traducción..."
   no_tl_updates: "No hay actualizaciones."
@@ -69,20 +88,22 @@ notification:
   update_completed: "Actualización completada."
   errors_during_update: "Se produjeron errores al actualizar (%{count}). Comprueba los registros para más detalles."
   checking_for_updates: "Buscando actualizaciones..."
+  github_update_unreachable: "No es posible conectar con GitHub, probando con Codeberg..."
   no_updates: "No hay actualizaciones."
-  press_to_set_menu_key: "Pulsa una tecla para establecer la tecla que abre el menú."
-  menu_open_key_set: "Tecla para abrir el menú: %{key}"
   ipc_softreset_exec: "Reinicio suave remoto (IPC) ejecutado con éxito."
   atlas_workaround_reset: "Archivos de Atlas modificados: arreglo temporal desactivado."
-
+  tl_repo_changed: "Repositorio cambiado. Se han recargado los datos de localización."
+  tl_repo_folder_missing: "No existe la carpeta de traducción. Busca actualizaciones para restaurarla."
+  freeform_window_disabled_landscape: "La ventana de forma libre se ha desactivado porque el modo horizontal está activo."
+  free_camera_unavailable_live: "Debido a un problema conocido, la Cámara Libre se ha desactivado porque no está disponible en este concierto."
+  recommended_ui_scale_applied: "Se ha aplicado el escalado de interfaz recomendado"
 
 first_time_setup:
   title: "Instalación Inicial"
   welcome_heading: "Bienvenido/a"
   welcome_content: >-
-    ¡Has instalado Hachimi correctamente! Esta ventana te guiará por el proceso de
-    instalación inicial. Si no te interesa usar las funciones de traducción, omite
-    el proceso con solo cerrar este diálogo.
+    ¡Has instalado Hachimi correctamente! Esta ventana te guiará por el proceso de instalación inicial.
+    Si no te interesa usar las funciones de traducción, omite el proceso con solo cerrar este diálogo.
 
 
     DISCLAIMER: Hachimi es un proyecto impulsado por la comunidad. Las traducciones han sido realizadas por varios
@@ -92,7 +113,11 @@ first_time_setup:
   translation_repo_heading: "Repositorio de traducción"
   select_translation_repo: "Selecciona un repositorio de traducción:"
   no_compatible_repo: "No se han encontrado repositorios compatibles con esta versión del juego."
-  skip_translation: "Omitir traducciones"
+  skip_translation: "Omitir traducciones."
+  common_settings_heading: "Ajustes comunes"
+  common_settings_content: >-
+    Esta sección alberga algunos de los ajustes de uso más frecuente.
+    Puedes modificar los ajustes en cualquier momento desde el Editor de Configuración.
   complete_heading: "¡Todo listo!"
   complete_content: >-
     Se ha ajustado el repositorio de traducción. Cuando pulses en Listo, se guardará
@@ -105,13 +130,26 @@ about:
   view_license: "Ver licencia"
   open_website: "Abrir sitio web"
   view_source_code: "Ver código fuente"
+  view_contributors: "Ver contribuidores"
 
 license:
   title: "Licencia"
+  gpl_v3_only_notice: "GPL-3.0-only License Text"
+  ofl_fonts_header: "This software bundles the following fonts under the SIL Open Font License 1.1:"
+  font_inter: "Inter: Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)"
+  font_font_awesome: "Font Awesome Version 4.7.0: Copyright Dave Gandy (https://fontawesome.com) 2016. All rights reserved."
+  font_m_plus_1: "M PLUS 1: Copyright 2021 The M+ FONTS Project Authors (https://github.com/coz-m/MPLUS_FONTS)"
+  font_pretendard: |
+    Pretendard: Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard), with Reserved Font Name 'Pretendard'.
+    - Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'. Source is a trademark of Adobe in the United States and/or other countries.
+    - Copyright 2021 The M+ FONTS Project Authors (https://github.com/coz-m/MPLUS_FONTS), with Reserved Font Name 'M PLUS 1'.
+  ofl_notice: "SIL OFL 1.1 License Text"
+  font_alibaba_header: "Alibaba PuHuiTi 3.0"
+  font_alibaba_body: "Copyright (c) 2020-2023 Alibaba (China) Co., Ltd. All rights reserved."
 
 tl_updater:
   title: "Actualizando..."
-  warning: "Las traducciones dejarán de funcionar mientras se actualizan"
+  warning: "Las traducciones no funcionarán mientras se actualizan"
 
 config_editor:
   title: "Editor de Configuración"
@@ -125,7 +163,7 @@ config_editor:
     Esta opción desactivará el overlay de Hachimi una vez reinicies el juego.
     Esto se traduce en que NO podrás acceder al Editor de Configuración tras ello.
     Si no es un cambio intencional, cierra este diálogo y DESACTIVA esta opción.
-  ipv4_only: "Usar IPv4 (sólo en ureq)"
+  ipv4_only: "Usar IPv4 (solo en ureq)"
   meta_index_url: "URL para las traducciones (meta)"
   debug_mode: "Modo depuración"
   enable_file_logging: "Guardar registro en un archivo"
@@ -133,28 +171,41 @@ config_editor:
   translator_mode: "Modo traductor"
   skip_first_time_setup: "Omitir instalación inicial"
   lazy_translation_updates: "Actualizaciones de traducciones (rápidas)"
+  etag_translation_updates: "Actualizaciones de traducciones (fastpath)"
   disable_auto_update_check: "Desactivar la búsqueda de actualizaciones"
+  tl_auto_updater_mode: "Modo de auto-actualización (traducciones)"
+  tl_auto_updater_periodic: "Periódico (preguntar)"
+  tl_auto_updater_silent: "Silencioso (automático)"
+  tl_auto_updater_interval: "Frecuencia de auto-actualización (traducciones)"
   disable_translations: "Desactivar traducciones"
   enable_ipc: "Habilitar IPC"
   ipc_listen_all: "IPC escuchar todo"
   auto_translate_stories: "Auto-traducir historias"
   auto_tl_warning: >-
     Nota: Esta función no funciona por sí sola; requiere configuración externa.
-    Active esta opción solo si tiene instalado un servidor de traducción compatible
-    instalado en tu ordenador o un servicio en la nube que exponga una API como
+    Activa esta opción solo si tiene instalado un servidor de traducción compatible
+    en tu ordenador o un servicio en la nube que exponga una API como
     py3translationServer o Sugoi Toolkit. Sin un servidor activo, no obtendrás
     traducciones adicionales y el rendimiento del juego podría verse afectado.
-    Por favor, déjela desactivada si no dispone de un servidor de traducción.
-  auto_translate_ui: "Auto-traducir UI\n(PUEDE ROMPER EL UI)"
+    Por favor, déjala desactivada si no dispone de un servidor de traducción.
+  auto_translate_ui: "Auto-traducir la UI (PUEDE ROMPER LA UI)"
+  taskbar_show_progress_on_download: "Progreso de la descarga en la barra de tareas"
+  taskbar_show_progress_on_connecting: "Progreso de la conexión en la barra de tareas"
+  taskbar_show_progress_on_schedule_book: "Progreso de la Agenda del Entrenador en la barra de tareas"
   target_fps: "FPS objetivo"
   virtual_resolution_multiplier: "Multiplicador de resolución virtual"
-  ui_scale: "Escala del UI"
+  ui_scale: "Escala de la UI"
+  recommended_ui_scale: "Aplicar escala del UI recomendada"
   gui_scale: "Escala del overlay"
+  old_config_editor: "Usar el antiguo Editor de Configuración"
   gui_landscape_ratio: "Relación de escala del overlay (apaisado)"
-  ui_animation_scale: "Escala de animación del UI"
+  ui_animation_scale: "Escala de animación de la UI"
   graphics_quality: "Calidad gráfica"
   vsync: "VSync"
   auto_full_screen: "Pantalla completa automática"
+  freeform_window: "Ventana de forma libre"
+  freeform_ui_scale_auto: "Ajustar automáticamente la escala de la UI en ventana de forma libre"
+  freeform_ui_scale_auto_ratio: "Relación de escala automática de la UI"
   full_screen_mode: "Modo de pantalla completa"
   full_screen_mode_exclusive: "Exclusiva"
   full_screen_mode_borderless: "Sin bordes"
@@ -167,17 +218,51 @@ config_editor:
   story_choice_auto_select_delay: "Retraso de selección automática (historia)"
   story_text_speed_multiplier: "Velocidad del texto (historia)"
   force_allow_dynamic_camera: "Permitir siempre la cámara dinámica"
-  live_theater_allow_same_chara: "Permitir personajes iguales en Live Theater"
+  free_camera: "Cámara Libre"
+  live_theater_allow_same_chara: "Permitir personajes duplicados en el Live Theater"
   physics_update_mode: "Modo de actualización de físicas"
+  cyspring_mono_uncap_frame_scale: "Desbloquear escala de frames del CySpring Mono"
   disable_skill_name_translation: "No traducir habilidades"
   hide_ingame_ui_hotkey: "Atajo para ocultar UI del juego"
   hide_ingame_ui_hotkey_info: >-
-    Esta opción te permite asignar una tecla para alternar el UI del juego.
-    En Android, tendrás que pulsar dos veces el botón de Volumen +, ó tocando tres veces la parte superior derecha de la pantalla.
+    Esta opción te permite asignar una tecla para alternar la UI del juego.
+    En Android, puedes tocar tres veces la parte superior derecha de la pantalla.
     En PC/Android con teclado será la tecla Insertar y podrá ser cambiada desde el GUI o en la configuración.
+  hide_ingame_ui_hotkey_bind: "Atajo para ocultar la interfaz del juego"
+  race_stat_hud: "Interfaz de estadísticas de carrera"
+  race_stat_hud_toggle_button: "Botón para mostrar/ocultar la interfaz de estadísticas de carrera"
+  race_stat_hud_toggle_key: "Tecla para mostrar/ocultar la interfaz de estadísticas de carrera"
+  race_stat_hud_landscapeui_portrait: "Interfaz de estadísticas de carrera (apaisado)"
+  race_stat_hud_draggable: "Interfaz de estadísticas de carrera arrastrable"
+  race_stat_hud_draggable_save: "Guardar posición de la interfaz de estadísticas de carrera"
+  race_stat_hud_width_scale: "Escala de anchura de la interfaz de estadísticas de carrera"
+  race_stat_hud_height_scale: "Escala de altura de la interfaz de estadísticas de carrera"
+  race_stat_hud_opacity_scale: "Opacidad de la interfaz de estadísticas de carrera"
+  race_stat_hud_persist_clones: "Conservar clones en la interfaz de estadísticas de carrera"
+  race_stat_hud_persist_selected_index: "Guardar personaje(s) seleccionado(s) en la interfaz de estadísticas de carrera"
+  race_playback_slider: "Barra de reproducción de la repetición de carreras"
+  race_playback_button: "Botón de pausa/reanudación de la repetición de carreras"
+  race_playback_key_enable: "Activar tecla para pausar/reanudar la repetición de carreras"
+  race_playback_key: "Tecla para pausar/reanudar la repetición de carreras"
+  live_slider_always_show: "Mostrar siempre la barra de reproducción en conciertos"
+  live_playback_loop: "Reproducir conciertos en bucle"
+  champions_live_show_text: "Reemplazar textos del concierto (Champions Meeting)"
+  champions_live_resource_id: "Título del Champions Meeting"
+  champions_live_year: "Año del Champions Meeting"
+  captions: "Subtítulos"
+  caption_lines_char_count: "Caracteres por línea en subtítulos"
+  caption_font_size: "Tamaño de fuente de los subtítulos"
+  caption_bg_alpha: "Opacidad del fondo de los subtítulos"
+  caption_pos_x: "Posición de los subtítulos (Eje X)"
+  caption_pos_y: "Posición de los subtítulos (Eje Y)"
+  caption_color: "Color del texto de los subtítulos"
+  caption_outline_color: "Color del borde de los subtítulos"
+  caption_outline_size: "Tamaño del borde de los subtítulos"
+  disable_tap_effect: "Desactivar efectos de toque en el juego"
   discord_rpc: "Discord RPC"
+  enable_smtc: "Habilitar controles multimedia de Windows"
   menu_open_key: "Tecla para abrir menú"
-  menu_open_key_set: "Establecer"
+  msaa: "MSAA"
   render_scale: "Escala de renderizado"
   aniso_level: "Filtrado anisotrópico"
   live_vocals_swap: "Cambiar vocalistas"
@@ -185,6 +270,13 @@ config_editor:
   skill_info_dialog: "Ver datos de habilidades (GUI)"
   homescreen_bgseason: "Estación en el menú principal"
   shadow_resolution: "Resolución de las sombras"
+  hide_now_loading: "Ocultar la pantalla de carga"
+  ui_loading_show_orientation_guide: "Ocultar guía para cambiar la orientación en la pantalla de carga"
+  replace_to_builtin_font: "Usar la fuente original del juego"
+  custom_title_name: "Título personalizado para la ventana"
+  ingame_webview: "Abrir enlaces de Umamusume (noticias, ayuda, gacha, ...) en el navegador integrado"
+  trainer_live_landscape: "Modo apaisado en el concierto Meni Shuki"
+  force_orientation_mode: "Forzar orientación"
 
 theme_editor:
   title: "Editor de temas (GUI)"
@@ -195,10 +287,202 @@ theme_editor:
   ui_text_color: "Color del texto"
   ui_window_rounding: "Radio de los bordes"
 
+set_keybind:
+  title: "Asignar tecla"
+  press_any_key: "Pulsa cualquier tecla..."
+  bound_key: "Tecla asignada: %{key}"
+
+race_stat_hud:
+  open_race_mechanics_confirm: "¿Quieres abrir el navegador para consultar el documento sobre las mecánicas de carrera? (Solo disponible en inglés)"
+  stats: "Estadísticas"
+  speed: "Velocidad"
+  accel: "Aceleración"
+  min_speed: "Vel. Mínima"
+  stamina: "Resistencia (PV)"
+  phase: "Fase"
+  order: "Posición"
+  distance: "Distancia"
+  lane: "Carril"
+  start_delay: "Retraso en salida"
+  finish: "Terminar"
+  used_skills: "Habilidades usadas"
+  unused_skills: "Habilidades no usadas"
+  autoscroll: "Desplazamiento automático"
+  phase_runup: "Salida"
+  phase_start: "Tramo inicial"
+  phase_middle: "Tramo medio"
+  phase_end: "Tramo final"
+  phase_last: "Esprint final"
+  phase_finished: "Meta"
+  lane_inner: "Interior"
+  lane_middle: "Medio"
+  lane_outer: "Exterior"
+  lane_outermost: "Exterior extremo"
+  temptation_sashi: "Acechador"
+  temptation_senko: "Líder"
+  temptation_nige: "Corredor"
+  temptation_boost: "Impulso"
+  good_start: "Buena salida"
+  bad_start: "Mala salida"
+  start_dash: "Aceleración inicial"
+  clog: "Bloqueada"
+  rushed: "Precipitada"
+  compete_fight: "Duelo por la posición"
+  compete_top: "Duelo por el liderato"
+  last_spurt: "Esprint final"
+  run_at_full_speed: "Esprint a fondo"
+  conserve_release: "Liberación"
+  stamina_limit_break: "Liberación de resistencia"
+  stamina_keep: "Conservación de resistencia"
+  compete_before_spurt: "Duelo de resistencia"
+  secure_lead: "Asegurar el liderato"
+
+free_camera:
+  settings_title: "Ajustes de cámara libre"
+  section_general: "General"
+  section_live: "Live Theater"
+  section_race: "Carreras"
+  section_keybinds: "Atajos de teclado"
+  remove_camera_effects: "Eliminar efectos de cámara"
+  live_remove_screen_effects: "Eliminar efectos de pantalla"
+  live_disable_character_teleport: "Desactivar teletransporte de personajes"
+  live_force_all_characters_visible: "Mostrar siempre todos los personajes"
+  show_overlay: "Mostrar superposición de cambio"
+  selfie_use_head_transform: "Usar palo selfie (Seguir personaje)"
+  mode: "Modo"
+  mode_free: "Movimiento libre"
+  mode_first_person: "Primera persona"
+  mode_selfie_stick: "Seguir personaje"
+  live_move_step: "Sensibilidad de movimiento (concierto)"
+  race_move_step: "Sensibilidad de movimiento (carrera)"
+  look_step: "Sensibilidad de orientación"
+  mouse_speed: "Velocidad del ratón"
+  live_fov: "Campo de visión (concierto)"
+  race_fov: "Campo de visión (carrera)"
+  gamepad_deadzone: "Zona muerta (mando)"
+  gamepad_move_speed: "Velocidad movimiento (mando)"
+  gamepad_look_speed: "Velocidad rotación (mando)"
+  live_target_position: "Posición objetivo (concierto)"
+  live_target_part: "Parte objetivo (concierto)"
+  live_selfie_horizontal_stabilization: "Zona muerta horizontal de cámara orbital (concierto)"
+  live_selfie_vertical_stabilization: "Zona muerta vertical de cámara orbital (concierto)"
+  live_follow_offset: "Desplazamiento de cámara orbital (concierto)"
+  live_follow_lookat_offset: "Desplazamiento del enfoque de cámara orbital (concierto)"
+  live_follow_smooth: "Suavizado de cámara orbital (concierto)"
+  live_follow_smooth_lookat_step: "Suavizado del enfoque de cámara orbital (concierto)"
+  live_follow_smooth_pos_step: "Suavizado de posición de cámara orbital (concierto)"
+  live_first_person_offset: "Desplazamiento en primera persona (concierto)"
+  race_target_index: "Índice objetivo en carrera (-1 = auto)"
+  race_follow_offset: "Desplazamiento de cámara orbital (carrera)"
+  race_follow_distance: "Distancia de cámara orbital (carrera)"
+  race_first_person_lookat_offset: "Desplazamiento del enfoque de cámara en primera persona (carrera)"
+  overlay_mode: "Modo: %{mode}"
+  overlay_target: "Objetivo: %{target}"
+  overlay_part: "Parte: %{part}"
+  target_auto: "Auto"
+  target_gate: "Puerta %{index}"
+  key_move_forward: "Moverse hacia delante"
+  key_move_back: "Moverse hacia atrás"
+  key_move_left: "Moverse a la izquierda"
+  key_move_right: "Moverse a la derecha"
+  key_move_down: "Moverse hacia abajo"
+  key_move_up: "Moverse hacia arriba"
+  key_look_up: "Mirar arriba"
+  key_look_down: "Mirar abajo"
+  key_look_left: "Mirar a la izquierda"
+  key_look_right: "Mirar a la derecha"
+  key_fov_increase: "Aumentar campo de visión"
+  key_fov_decrease: "Reducir campo de visión"
+  key_follow_offset_up: "Desplazar cámara hacia arriba"
+  key_follow_offset_down: "Desplazar cámara hacia abajo"
+  key_follow_offset_left: "Desplazar cámara a la izquierda"
+  key_follow_offset_right: "Desplazar cámara a la derecha"
+  key_target_previous: "Objetivo anterior"
+  key_target_next: "Siguiente objetivo"
+  key_part_previous: "Parte anterior"
+  key_part_next: "Siguiente parte"
+  key_reset: "Restablecer posición de la cámara"
+  key_cycle_mode: "Cambiar modo"
+  key_reverse: "Invertir perspectiva de cámara (frontal <-> trasera)"
+  cheatsheet_title: "Guía de la cámara libre"
+  cheatsheet_contents: |
+    # Guía rápida de la Cámara Libre
+    Esta función solo está disponible en **Carreras** o **Conciertos**.
+    
+    La parte del cuerpo por defecto es **Face**.
+    
+    El objetivo por defecto es **Place01**.
+    
+    ## Controles de ratón
+    * **Mantener clic derecho + arrastrar:** Mirar alrededor
+    * **Rueda del ratón arriba / abajo:** Aumentar campo de visión / Reducir campo de visión
+    
+    ---
+    
+    ## Controles de mando (Xbox / PlayStation)
+    
+    ### **Movimiento y ángulo de cámara**
+    * **Joystick izquierdo:** Mover a la izquierda / derecha / avanzar / retroceder
+    * **Joystick derecho:** Mirar a la izquierda / derecha / arriba / abajo
+    * **Gatillo derecho (RT / R2):** Mover hacia arriba
+    * **Gatillo izquierdo (LT / L2):** Mover hacia abajo
+    * **Botón de hombro derecho (RB / R1):** Reducir campo de visión
+    * **Botón de hombro izquierdo (LB / L1):** Aumentar campo de visión
+    
+    ---
+    
+    ### Botones de acción
+    * **Y** (Triángulo): Restablecer posición de la cámara
+    * **X** (Cuadrado): Cambiar modo de cámara
+    * **B** (Círculo): Invertir perspectiva orbital *(frontal <-> trasera, solo en cámara orbital)*
+    * **A** (Cruz): Pausar / reanudar concierto
+    
+    ---
+    
+    ### Controles de la cruceta (No disponible en movimiento libre)
+    * **Cruceta derecha:** Siguiente objetivo *(Cámara orbital y primera persona)*
+    * **Cruceta izquierda:** Objetivo anterior *(Cámara orbital y primera persona)*
+    * **Cruceta arriba:** Siguiente parte *(Solo en cámara orbital)*
+    * **Cruceta abajo:** Parte anterior *(Solo en cámara orbital)*
+
+excludes_editor:
+  title: "Editor de exclusiones"
+  no_paths_available: "No hay rutas para excluir"
+  saved: "Exclusiones guardadas con éxito"
+  confirm_remove: "¿Está seguro de querer eliminar \"%{path}\" de las exclusiones?"
+
+change_translation_repo:
+  title: "Cambiar repositorio de traducción"
+  no_repos: "Aún no hay repositorios de traducción descargados."
+  browse_repositories: "Ver repositorios"
+  active: "Activo"
+  available: "Disponible"
+  confirm_remove: "¿Está seguro de querer eliminar \"%{name}\"?"
+  cannot_remove_active: "No es posible eliminar el repositorio activo si no lo cambias a otro primero."
+  removing: "Eliminando repositorio..."
+  remove_in_progress: "No es posible eliminar el repositorio mientras se encuentre otro proceso de eliminación en curso."
+
+add_translation_repo:
+  title: "Añadir repositorio de traducción"
+  select_translation_repo: "Selecciona un repositorio:"
+  already_downloaded: "(ya descargado)"
+
+translation_repo_info:
+  details_title: "Detalles del repositorio de traducción"
+  homepage: "Página web"
+  maintainer: "Mantenedor"
+  contributors: "Contribuidores"
+  view_contributors: "Ver contribuidores"
+  links: "Enlaces"
+
 tl_update_dialog:
   title: "Nueva actualización disponible"
-  content: "Existen nuevos datos de traducción (%{size}).\n¿Deseas descargarlos ahora?"
-  content_zip_warning: "Existen nuevos datos de traducción (%{changed_size}).\nEsta actualización descargará el archivo completo (%{download_size})."
+  content: "Existen nuevos datos de traducción (%{size}). ¿Deseas descargarlos ahora?"
+  content_zip_warning: "Existen nuevos datos de traducción (%{changed_size}). Esta actualización descargará el archivo completo (%{download_size})."
+  show_changelog: "Ver cambios"
+  changelog_title: "Registro de cambios"
+  changelog_fetch_failed: "No se pudo obtener el registro de cambios."
+  changelog_invalid: "El contenido del registro de cambios no tiene formato de texto válido."
 
 update_prompt_dialog:
   title: "Nueva actualización disponible"
@@ -207,10 +491,13 @@ update_prompt_dialog:
     ¿Quieres instalarla ahora? El juego será reiniciado para así poder
     aplicar la actualización.
   android_content: |
-    Se ha encontrado una nueva actualización de Hachimi Edge (%{version}).\n¿Quieres instalarla ahora?
+    Se ha encontrado una nueva versión de Hachimi Edge (%{version}).
 
-    Pulsa "Sí" para abrir UmaPatcher Edge para volver a parchear el juego.
-    (No es necesario volver a descargar el juego o los APK, solo parchea el juego nuevamente como normalmente lo harías. UmaPatcher Edge siempre descargará la nueva versión de Hachimi Edge.)
+    ¿Quieres abrir UmaPatcher Edge y actualizar?
+  show_changelog: "Ver cambios"
+  changelog_title: "Registro de cambios"
+  changelog_fetch_failed: "No se pudo obtener el registro de cambios."
+  changelog_invalid: "El contenido del registro de cambios no tiene formato de texto válido."
 
 updating_dialog:
   title: "Actualizando"
@@ -219,16 +506,26 @@ updating_dialog:
 steam_overlay_conflict_dialog:
   title: "Aviso"
   content: >-
-    Las compras podrían no funcionar con el overlay de Hachimi activo. Si el overlay de Steam ya apareció
-    para realizar compras, ignora este mensaje y pulsa No. Si no apareció nada, pulsa Sí para desactivar
-    temporalmente el overlay de Hachimi. Esto cerrará el juego, y la próxima vez que se inicie el overlay de
-    Hachimi estará desactivado para que puedas realizar compras. Después de realizar tus compras, podrás
-    volver a usar el overlay de Hachimi al reiniciar el juego.
+    Las compras podrían dejar de funcionar si el overlay de Hachimi está activo. Si ya ves el overlay para
+    realizar compras en Steam, ignora este mensaje y pulsa No. Si no ves nada, pulsa Sí para desactivar
+    temporalmente el overlay de Hachimi. Esto cerrará el juego y, al iniciarlo nuevamente, el overlay de
+    Hachimi estará desactivado para que puedas realizar compras. Después de realizarlas, podrás
+    volver a usar el overlay de Hachimi tras reiniciar el juego.
+
+ingame_webview_dialog:
+  open_browser: "Abrir en navegador"
+  title:
+    notice: "Aviso"
+    general: "Navegador del juego"
+    gacha: "Gacha"
+    help: "Ayuda"
+
 key_names:
   left: "Flecha Izq."
   right: "Flecha Der."
   up: "Flecha Arriba"
   down: "Flecha Abajo"
+  back: "Atrás"
   insert: "Insertar"
   delete: "Suprimir"
   home: "Inicio"
@@ -252,6 +549,26 @@ key_names:
   alt: "Alt"
   ctrl: "Ctrl"
   shift: "Mayús."
+  dpad_up: "Cruceta arriba"
+  dpad_down: "Cruceta abajo"
+  dpad_left: "Cruceta izquierda"
+  dpad_right: "Cruceta derecha"
+  volume_up: "Subir volumen"
+  volume_down: "Bajar volumen"
+  copy: "Copiar"
+  cut: "Cortar"
+  paste: "Pegar"
+  semicolon: ";"
+  comma: ","
+  backslash: "\\"
+  slash: "/"
+  left_bracket: "["
+  right_bracket: "]"
+  grave: "`"
+  minus: "-"
+  period: "."
+  plus: "+"
+  equals: "="
   numpad_0: "Num 0"
   numpad_1: "Num 1"
   numpad_2: "Num 2"
@@ -267,3 +584,4 @@ key_names:
   numpad_multiply: "Num *"
   numpad_divide: "Num /"
   numpad_decimal: "Num ."
+  unknown: "Tecla %{code}"

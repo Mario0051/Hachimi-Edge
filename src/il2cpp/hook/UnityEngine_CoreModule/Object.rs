@@ -20,6 +20,13 @@ impl_addr_wrapper_fn!(
     FindObjectsOfType, FINDOBJECTSOFTYPE_ADDR, Array<*mut Il2CppObject>, type_: *mut Il2CppObject, include_inactive: bool
 );
 
+static mut OP_IMPLICIT_ADDR: usize = 0;
+impl_addr_wrapper_fn!(op_Implicit, OP_IMPLICIT_ADDR, bool, exists: *mut Il2CppObject);
+
+// Used to instantiate prefabs under a parent transform.
+static mut CLONE_WITH_PARENT_ADDR: usize = 0;
+impl_addr_wrapper_fn!(Internal_CloneSingleWithParent, CLONE_WITH_PARENT_ADDR, *mut Il2CppObject, prefab: *mut Il2CppObject, parent: *mut Il2CppObject, world_position_stays: bool);
+
 pub fn init(UnityEngine_CoreModule: *const Il2CppImage) {
     get_class_or_return!(UnityEngine_CoreModule, UnityEngine, Object);
 
@@ -31,6 +38,10 @@ pub fn init(UnityEngine_CoreModule: *const Il2CppImage) {
         SET_NAME_ADDR = get_method_addr(Object, c"set_name", 1);
         FINDOBJECTSOFTYPE_ADDR = il2cpp_resolve_icall(
             c"UnityEngine.Object::FindObjectsOfType(System.Type,System.Boolean)".as_ptr()
+        );
+        OP_IMPLICIT_ADDR = get_method_addr(Object, c"op_Implicit", 1);
+        CLONE_WITH_PARENT_ADDR = il2cpp_resolve_icall(
+            c"UnityEngine.Object::Internal_CloneSingleWithParent()".as_ptr()
         );
     }
 }

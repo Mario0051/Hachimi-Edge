@@ -1,12 +1,17 @@
-use std::{borrow::Cow, fs::File, io::Write, sync::Mutex, path::Path, time::SystemTime};
+use std::{borrow::Cow, fs::File, io::Write, path::Path, sync::atomic::{AtomicUsize, Ordering}, time::SystemTime};
 
 use serde::Serialize;
 use textwrap::{core::Word, wrap_algorithms, WordSeparator::UnicodeBreakProperties};
 use unicode_width::UnicodeWidthChar;
-use fnv::FnvHashMap;
-use once_cell::sync::Lazy;
 
-use crate::{core::Gui, il2cpp::{ext::{Il2CppStringExt, StringExt}, hook::umamusume::{Localize, TextId}, types::{Il2CppObject, Il2CppString}, symbols::Thread}};
+use crate::{
+    core::Gui,
+    il2cpp::{
+        ext::{Il2CppObjectExt, Il2CppStringExt, StringExt},
+        hook::umamusume::{Localize, TextId},
+        types::{Il2CppObject, Il2CppString}
+    }
+};
 
 use super::{Error, Hachimi};
 
@@ -17,38 +22,14 @@ pub struct SendPtr(pub *mut Il2CppObject);
 unsafe impl Send for SendPtr {}
 unsafe impl Sync for SendPtr {}
 
-static LOCALIZE_ID_CACHE: Lazy<Mutex<FnvHashMap<String, i32>>> = 
-    Lazy::new(|| Mutex::new(FnvHashMap::default()));
-
 pub fn get_localized_string(id_name: &str) -> String {
-    let check_cache = |name: &str| -> Option<String> {
-        let cache = LOCALIZE_ID_CACHE.lock().unwrap();
-        if let Some(&id) = cache.get(name) {
-            let ptr = Localize::Get(id);
-            if !ptr.is_null() {
-                return Some(unsafe { (*ptr).as_utf16str() }.to_string());
-            }
-            return Some(name.to_owned());
+    if let Some(id) = TextId::get_from_name(id_name) {
+        let ptr = Localize::Get(id);
+        if !ptr.is_null() {
+            return unsafe { (*ptr).as_utf16str() }.to_string();
         }
-        None
-    };
-
-    if let Some(result) = check_cache(id_name) {
-        return result;
     }
-
-    let id_name_owned = id_name.to_owned();
-    static PENDING_NAME: Mutex<Option<String>> = Mutex::new(None);
-    *PENDING_NAME.lock().unwrap() = Some(id_name_owned.clone());
-
-    Thread::main_thread().schedule(|| {
-        if let Some(name) = PENDING_NAME.lock().unwrap().take() {
-            let val = TextId::from_name(&name);
-            LOCALIZE_ID_CACHE.lock().unwrap().insert(name, val);
-        }
-    });
-
-    check_cache(id_name).unwrap_or_else(|| id_name.to_owned())
+    id_name.to_owned()
 }
 
 pub fn char_to_utf16_index(text: &str, char_idx: usize) -> i32 {
@@ -61,7 +42,7 @@ pub fn char_to_utf16_index(text: &str, char_idx: usize) -> i32 {
 pub fn utf16_to_char_index(text: &str, utf16_idx: usize) -> usize {
     let mut current_utf16_pos = 0;
     let mut char_pos = 0;
-    
+
     for c in text.chars() {
         if current_utf16_pos >= utf16_idx {
             break;
@@ -448,7 +429,13 @@ pub fn wrap_fit_text(string: &str, base_line_width: i32, mut max_line_count: i32
     loop {
         let wrapped = wrap_text_internal(string, line_width.round() as i32, line_width_multiplier);
         if wrapped.len() as i32 <= max_line_count {
-            return Some(add_size_tag(&wrapped.join("\n"), font_size.round() as i32));
+            let new_size = font_size.round() as i32;
+            let new_text = wrapped.join("\n");
+            return Some(if new_size != base_font_size {
+                add_size_tag(&new_text, new_size)
+            } else {
+                new_text
+            });
         }
 
         let prev_max_line_count = max_line_count;
@@ -622,23 +609,27 @@ pub fn get_data_path() -> String {
     #[cfg(target_os = "windows")]
     {
         use crate::{
-            core::game::Region,
             il2cpp::hook::UnityEngine_CoreModule::Application,
-            windows::utils::get_game_dir
+            windows::utils::{get_game_dir, get_exec_path}
         };
 
-        let game = &Hachimi::instance().game;
-        let jp_steam_data_path = get_game_dir()
-            .join("UmamusumePrettyDerby_Jpn_Data")
-            .join("Persistent");
-        let new_jp_dmm_data_path = get_game_dir()
-            .join("umamusume_Data")
+        let exec_name = get_exec_path().file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let data_folder_name = format!("{}_Data", exec_name);
+
+        let local_data_path = get_game_dir()
+            .join(data_folder_name)
             .join("Persistent");
 
-        if game.region == Region::Japan && game.is_steam_release && jp_steam_data_path.exists() {
-            jp_steam_data_path.to_string_lossy().to_string()
-        } else if game.region == Region::Japan && !game.is_steam_release && new_jp_dmm_data_path.exists() {
-            new_jp_dmm_data_path.to_string_lossy().to_string()
+        let dir_ok = |path: &std::path::Path| {
+            path.exists()
+                && std::fs::read_dir(path)
+                    .map(|mut d| d.next().is_some())
+                    .unwrap_or(false)
+                && path.join("master").join("master.mdb").exists()
+        };
+
+        if dir_ok(&local_data_path) {
+            local_data_path.to_string_lossy().to_string()
         } else {
             unsafe { (*Application::get_persistentDataPath()).as_utf16str() }.to_string()
         }
@@ -655,6 +646,29 @@ pub fn get_data_path() -> String {
 pub fn get_masterdb_path() -> String {
     info!("get_masterdb_path base: {}", get_data_path());
     format!("{}/master/master.mdb", get_data_path())
+}
+
+pub fn get_meta_path() -> String {
+    #[cfg(target_os = "android")]
+    {
+        format!("{}/meta", get_data_path())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use crate::{
+            core::game::Region,
+            windows::utils::get_game_dir
+        };
+
+        let game = &Hachimi::instance().game;
+
+        if game.region == Region::Taiwan {
+            get_game_dir().join("meta").to_string_lossy().to_string()
+        } else {
+            std::path::PathBuf::from(get_data_path()).join("meta").to_string_lossy().to_string()
+        }
+    }
 }
 
 // Intentionally dumb png loader implementation that only loads RGBA8 images
@@ -682,4 +696,70 @@ pub fn notify_error(message: impl AsRef<str>) {
 
 pub fn mul_int (base:i32, mult: f32) -> i32 {
     (base as f32 * mult).round() as i32
+}
+
+pub fn get_proc_address(handle: usize, name: &std::ffi::CStr) -> usize {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows::utils::get_proc_address(windows::Win32::Foundation::HMODULE(handle as _), name)
+    }
+    #[cfg(target_os = "android")]
+    {
+        unsafe { libc::dlsym(handle as *mut libc::c_void, name.as_ptr()) as usize }
+    }
+}
+
+static RACE_SEEK_STAGE: AtomicUsize = AtomicUsize::new(0);
+
+pub fn race_seek_stage(stage: usize) {
+    RACE_SEEK_STAGE.store(stage, Ordering::Release);
+}
+
+#[cfg(target_os = "windows")]
+pub fn race_seek_seh<F: FnMut()>(mut f: F) -> bool {
+    if let Err(e) = microseh::try_seh(|| f()) {
+        let stage = RACE_SEEK_STAGE.load(Ordering::Acquire);
+        error!(
+            "[race slider] seek faulted at stage {}: {} at {:#x} (rip {:#x}), state reset, race left paused",
+            stage,
+            e.code(),
+            e.address() as usize,
+            e.registers().rip()
+        );
+        false
+    } else {
+        true
+    }
+}
+
+#[cfg(target_os = "android")]
+pub fn race_seek_seh<F: FnOnce()>(f: F) -> bool {
+    f();
+    true
+}
+
+pub fn clear_il2cpp_list(list: *mut Il2CppObject) {
+    use crate::il2cpp::symbols::get_method_addr_cached;
+
+    if list.is_null() { return; }
+
+    let list_class = unsafe { (*list).klass() };
+    if list_class.is_null() { return; }
+
+    let clear_addr = get_method_addr_cached(list_class, c"Clear", 0);
+    if clear_addr == 0 { return; }
+
+    let clear: extern "C" fn(*mut Il2CppObject) = unsafe { std::mem::transmute(clear_addr) };
+    clear(list);
+}
+
+pub fn set_clipboard_text(text: &str) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::utils::set_clipboard_text(text)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows::utils::set_clipboard_text(text)
+    }
 }

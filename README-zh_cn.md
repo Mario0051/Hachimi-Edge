@@ -2,13 +2,14 @@
 
 # Hachimi Edge
 
-[English](README.md) | 简体中文 | [繁體中文](README-zh_tw.md)
+[English](README.md) | 简体中文 | [繁體中文](README-zh_tw.md) | [Filipino](README-fil.md) | [한국어](README-ko.md) | [Русский](README-ru.md)
 
 [![Discord 服务器](https://dcbadge.limes.pink/api/server/https://discord.gg/YjBgmuqqYr)](https://discord.gg/YjBgmuqqYr)
 
 某赛马拟人化游戏的游戏增强与翻译插件。
 
-<img height="400" src="assets/screenshot.jpg">
+<img width="100%" height="100%" src="assets/screenshot-1.png">
+<img width="100%" height="100%" src="assets/screenshot-2.png">
 
 # ⚠️ 请不要分享这个仓库与 Hachimi 网站的相关链接
 我们非常理解您希望帮助别人安装 Hachimi 来与其获得更好的游戏体验。但是，此项目本质上违反了游戏的服务条款，如果被游戏的开发商得知，他们肯定会希望这个项目灰飞烟灭。
