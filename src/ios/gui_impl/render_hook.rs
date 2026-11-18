@@ -55,7 +55,7 @@ extern "C" fn hooked_next_drawable(self_layer: *mut AnyObject, sel: Sel) -> *mut
     }
 }
 
-extern "C" fn hooked_present(self_drawable: *mut AnyObject, sel: Sel) {
+extern "C" fn hooked_present(self_drawable: *mut AnyObject, _sel: Sel) {
     unsafe {
         let queue = EGUI_COMMAND_QUEUE.load(Ordering::Acquire);
         if !queue.is_null() {
@@ -74,7 +74,7 @@ extern "C" fn hooked_present(self_drawable: *mut AnyObject, sel: Sel) {
                     let full_output = gui.run();
 
                     let pixels_per_point = gui.context.pixels_per_point();
-                    let screen_size = gui.context.screen_rect().size();
+                    let screen_size = gui.context.content_rect().size();
 
                     let primitives = gui.context.tessellate(full_output.shapes, pixels_per_point);
 

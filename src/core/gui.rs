@@ -275,16 +275,6 @@ impl ShortcutOption {
             ShortcutOption::LiveVocalsSwap => t!("config_editor.live_vocals_swap")
         }
     }
-
-    #[cfg(target_os = "android")]
-    pub fn is_available(self) -> bool {
-        self != ShortcutOption::FreeCamera
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn is_available(self) -> bool {
-        true
-    }
 }
 
 pub fn update_shortcut(shortcuts: &mut Vec<hachimi::ShortcutEntry>, option: ShortcutOption, key: i32) {
@@ -317,7 +307,7 @@ fn toggle_shortcut_window(option: ShortcutOption) {
             ShortcutOption::FreeCamera => {
                 gui.show_window(Box::new(FreeCameraSettingsWindow::new()));
             },
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             ShortcutOption::FreeCamera => {},
             ShortcutOption::LiveVocalsSwap => {
                 gui.show_window(Box::new(LiveVocalsSwapWindow::new()));
@@ -359,12 +349,12 @@ pub fn toggle_race_stat_hud_clone(index: usize) {
 }
 
 // portrait: full width, fixed at 38% of the screen height
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 const RACE_STAT_HUD_PORTRAIT_HEIGHT_RATIO: f32 = 0.38;
 // landscape: fixed at 40% of the screen width and 55% of the screen height
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 const RACE_STAT_HUD_LANDSCAPE_WIDTH_RATIO: f32 = 0.4;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 const RACE_STAT_HUD_LANDSCAPE_HEIGHT_RATIO: f32 = 0.55;
 
 #[cfg(target_os = "windows")]
@@ -1001,7 +991,7 @@ impl RaceStatHud {
         Self::game_view_windows(screen, ctx.pixels_per_point())
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn game_view(_ctx: &egui::Context, screen: egui::Rect) -> (egui::Rect, bool, &'static str) {
         (screen, false, "window")
     }
@@ -1022,7 +1012,7 @@ impl RaceStatHud {
             let (w, h) = RACE_STAT_HUD_FIXED_LANDSCAPE;
             egui::vec2(w, h)
         };
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         let base = if vertical {
             // portrait: full width at the bottom of the game view
             egui::vec2(game_view.width(), game_view.height() * RACE_STAT_HUD_PORTRAIT_HEIGHT_RATIO)
@@ -1359,7 +1349,9 @@ impl RaceStatHud {
             { Hachimi::instance().config.load().android.race_stat_hud_toggle_key }
             #[cfg(target_os = "windows")]
             { Hachimi::instance().config.load().windows.race_stat_hud_toggle_key }
-            #[cfg(not(any(target_os = "android", target_os = "windows")))]
+            #[cfg(target_os = "ios")]
+            { Hachimi::instance().config.load().ios.race_stat_hud_toggle_key }
+            #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "ios")))]
             { 0 }
         };
         if raw == 0 {
@@ -1369,7 +1361,9 @@ impl RaceStatHud {
         return crate::android::gui_impl::keymap::keycode_display_label(raw);
         #[cfg(target_os = "windows")]
         return crate::windows::utils::vk_to_display_label(raw as u16);
-        #[cfg(not(any(target_os = "android", target_os = "windows")))]
+        #[cfg(target_os = "ios")]
+        return format!("Key {}", raw);
+        #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "ios")))]
         return raw.to_string();
     }
 
@@ -1389,6 +1383,8 @@ impl RaceStatHud {
                     { new_config.windows.race_stat_hud_toggle_key = raw; }
                     #[cfg(target_os = "android")]
                     { new_config.android.race_stat_hud_toggle_key = raw; }
+                    #[cfg(target_os = "ios")]
+                    { new_config.ios.race_stat_hud_toggle_key = raw; }
 
                     save_and_reload_config(new_config);
                 } else {
@@ -2673,7 +2669,7 @@ fn take_plugin_windows_to_close() -> Vec<i32> {
 
 #[cfg(target_os = "windows")]
 pub type RawKeybind = u16;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub type RawKeybind = i32;
 
 static KEYBIND_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -3474,7 +3470,7 @@ impl Gui {
             Some((rect, _)) => rect,
             None => screen
         };
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         let game_view = screen;
 
         let paused = RaceManagerReplayBase::IsPaused(race_manager);
@@ -4023,6 +4019,8 @@ impl Gui {
                                         { crate::android::gui_impl::keymap::keycode_display_label(key) }
                                         #[cfg(target_os = "windows")]
                                         { crate::windows::utils::vk_to_display_label(key as u16) }
+                                        #[cfg(target_os = "ios")]
+                                        { format!("Key {}", key) }
                                     };
                                     format!("{} ({})", option.label(), key_label)
                                 } else {
@@ -4517,7 +4515,7 @@ impl Gui {
             !IS_CONSUMING_INPUT.load(atomic::Ordering::Acquire) &&
             !GUI_INPUT_ACTIVE.load(atomic::Ordering::Acquire)
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             !self.splash_visible && !self.menu_visible && !self.update_progress_visible &&
             self.notifications.is_empty() && self.windows.is_empty() &&
@@ -5429,9 +5427,9 @@ impl ConfigEditor {
 
         if let Some(num) = value.as_mut() {
             ui.label("");
-            let res = ui.add(egui::Slider::new(num, range));
+            let _res = ui.add(egui::Slider::new(num, range));
             #[cfg(any(target_os = "android", target_os = "ios"))]
-            crate::core::gui::handle_mobile_keyboard(&res, num);
+            crate::core::gui::handle_mobile_keyboard(&_res, num);
             ui.end_row();
         }
     }
@@ -5596,9 +5594,9 @@ impl ConfigEditor {
 
             if should_show_option(search, &t!("config_editor.gui_scale")) {
                 ui.label(t!("config_editor.gui_scale"));
-                let res = ui.add(egui::Slider::new(&mut config.gui_scale, 0.25..=2.0).step_by(0.05));
+                let _res = ui.add(egui::Slider::new(&mut config.gui_scale, 0.25..=2.0).step_by(0.05));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.gui_scale);
+                handle_mobile_keyboard(&_res, &mut config.gui_scale);
                 ui.end_row();
             }
 
@@ -5663,6 +5661,8 @@ impl ConfigEditor {
                                 { new_config.windows.menu_open_key = raw; }
                                 #[cfg(target_os = "android")]
                                 { new_config.android.menu_open_key = raw; }
+                                #[cfg(target_os = "ios")]
+                                { new_config.ios.menu_open_key = raw; }
 
                                 save_and_reload_config(new_config);
                             })));
@@ -5673,6 +5673,8 @@ impl ConfigEditor {
                     ui.label(crate::android::gui_impl::keymap::keycode_display_label(config.android.menu_open_key));
                     #[cfg(target_os = "windows")]
                     ui.label(crate::windows::utils::vk_to_display_label(config.windows.menu_open_key));
+                    #[cfg(target_os = "ios")]
+                    ui.label(format!("Key {}", config.ios.menu_open_key));
                 });
                 ui.end_row();
                 ui.label("");
@@ -5681,6 +5683,8 @@ impl ConfigEditor {
                     { config.windows.menu_open_key = crate::windows::hachimi_impl::Config::default_menu_open_key(); }
                     #[cfg(target_os = "android")]
                     { config.android.menu_open_key = crate::android::hachimi_impl::Config::default_menu_open_key(); }
+                    #[cfg(target_os = "ios")]
+                    { config.ios.menu_open_key = crate::ios::hachimi_impl::Config::default_menu_open_key(); }
                 }
                 ui.end_row();
             }
@@ -5892,17 +5896,17 @@ impl ConfigEditor {
 
             if should_show_option(search, &t!("config_editor.virtual_resolution_multiplier")) {
                 ui.label(t!("config_editor.virtual_resolution_multiplier"));
-                let res = ui.add(egui::Slider::new(&mut config.virtual_res_mult, 1.0..=4.0).step_by(0.1));
+                let _res = ui.add(egui::Slider::new(&mut config.virtual_res_mult, 1.0..=4.0).step_by(0.1));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.virtual_res_mult);
+                handle_mobile_keyboard(&_res, &mut config.virtual_res_mult);
                 ui.end_row();
             }
 
             if should_show_option(search, &t!("config_editor.ui_scale")) {
                 ui.label(t!("config_editor.ui_scale"));
-                let res = ui.add(egui::Slider::new(&mut config.ui_scale, 0.1..=10.0).step_by(0.05));
+                let _res = ui.add(egui::Slider::new(&mut config.ui_scale, 0.1..=10.0).step_by(0.05));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.ui_scale);
+                handle_mobile_keyboard(&_res, &mut config.ui_scale);
                 ui.end_row();
             }
 
@@ -5931,17 +5935,17 @@ impl ConfigEditor {
 
             if should_show_option(search, &t!("config_editor.ui_animation_scale")) {
                 ui.label(t!("config_editor.ui_animation_scale"));
-                let res = ui.add(egui::Slider::new(&mut config.ui_animation_scale, 0.1..=10.0).step_by(0.1));
+                let _res = ui.add(egui::Slider::new(&mut config.ui_animation_scale, 0.1..=10.0).step_by(0.1));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.ui_animation_scale);
+                handle_mobile_keyboard(&_res, &mut config.ui_animation_scale);
                 ui.end_row();
             }
 
             if should_show_option(search, &t!("config_editor.render_scale")) {
                 ui.label(t!("config_editor.render_scale"));
-                let res = ui.add(egui::Slider::new(&mut config.render_scale, 0.1..=10.0).step_by(0.1));
+                let _res = ui.add(egui::Slider::new(&mut config.render_scale, 0.1..=10.0).step_by(0.1));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.render_scale);
+                handle_mobile_keyboard(&_res, &mut config.render_scale);
                 ui.end_row();
             }
 
@@ -6149,17 +6153,17 @@ impl ConfigEditor {
 
             if should_show_option(search, &t!("config_editor.story_choice_auto_select_delay")) {
                 ui.label(t!("config_editor.story_choice_auto_select_delay"));
-                let res = ui.add(egui::Slider::new(&mut config.story_choice_auto_select_delay, 0.1..=10.0).step_by(0.05));
+                let _res = ui.add(egui::Slider::new(&mut config.story_choice_auto_select_delay, 0.1..=10.0).step_by(0.05));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.story_choice_auto_select_delay);
+                handle_mobile_keyboard(&_res, &mut config.story_choice_auto_select_delay);
                 ui.end_row();
             }
 
             if should_show_option(search, &t!("config_editor.story_text_speed_multiplier")) {
                 ui.label(t!("config_editor.story_text_speed_multiplier"));
-                let res = ui.add(egui::Slider::new(&mut config.story_tcps_multiplier, 0.1..=10.0).step_by(0.1));
+                let _res = ui.add(egui::Slider::new(&mut config.story_tcps_multiplier, 0.1..=10.0).step_by(0.1));
                 #[cfg(any(target_os = "android", target_os = "ios"))]
-                handle_mobile_keyboard(&res, &mut config.story_tcps_multiplier);
+                handle_mobile_keyboard(&_res, &mut config.story_tcps_multiplier);
                 ui.end_row();
             }
 
@@ -6307,6 +6311,8 @@ impl ConfigEditor {
                                 { new_config.windows.hide_ingame_ui_hotkey_bind = raw; }
                                 #[cfg(target_os = "android")]
                                 { new_config.android.hide_ingame_ui_hotkey_bind = raw; }
+                                #[cfg(target_os = "ios")]
+                                { new_config.ios.hide_ingame_ui_hotkey_bind = raw; }
 
                                 save_and_reload_config(new_config);
                             })));
@@ -6317,6 +6323,8 @@ impl ConfigEditor {
                     ui.label(crate::android::gui_impl::keymap::keycode_display_label(config.android.hide_ingame_ui_hotkey_bind));
                     #[cfg(target_os = "windows")]
                     ui.label(crate::windows::utils::vk_to_display_label(config.windows.hide_ingame_ui_hotkey_bind));
+                    #[cfg(target_os = "ios")]
+                    ui.label(format!("Key {}", config.ios.hide_ingame_ui_hotkey_bind));
                 });
                 ui.end_row();
                 ui.label("");
@@ -6325,6 +6333,8 @@ impl ConfigEditor {
                     { config.windows.hide_ingame_ui_hotkey_bind = crate::windows::hachimi_impl::Config::default_hide_ingame_ui_hotkey_bind(); }
                     #[cfg(target_os = "android")]
                     { config.android.hide_ingame_ui_hotkey_bind = crate::android::hachimi_impl::Config::default_hide_ingame_ui_hotkey_bind(); }
+                    #[cfg(target_os = "ios")]
+                    { config.ios.hide_ingame_ui_hotkey_bind = crate::ios::hachimi_impl::Config::default_hide_ingame_ui_hotkey_bind(); }
                 }
                 ui.end_row();
             }
@@ -6360,6 +6370,8 @@ impl ConfigEditor {
                                 { new_config.windows.race_stat_hud_toggle_key = raw; }
                                 #[cfg(target_os = "android")]
                                 { new_config.android.race_stat_hud_toggle_key = raw; }
+                                #[cfg(target_os = "ios")]
+                                { new_config.ios.race_stat_hud_toggle_key = raw; }
 
                                 save_and_reload_config(new_config);
                             })));
@@ -6370,6 +6382,8 @@ impl ConfigEditor {
                     ui.label(crate::android::gui_impl::keymap::keycode_display_label(config.android.race_stat_hud_toggle_key));
                     #[cfg(target_os = "windows")]
                     ui.label(crate::windows::utils::vk_to_display_label(config.windows.race_stat_hud_toggle_key));
+                    #[cfg(target_os = "ios")]
+                    ui.label(format!("Key {}", config.ios.race_stat_hud_toggle_key));
                 });
                 ui.end_row();
                 ui.label("");
@@ -6378,6 +6392,8 @@ impl ConfigEditor {
                     { config.windows.race_stat_hud_toggle_key = crate::windows::hachimi_impl::Config::default_race_stat_hud_toggle_key(); }
                     #[cfg(target_os = "android")]
                     { config.android.race_stat_hud_toggle_key = crate::android::hachimi_impl::Config::default_race_stat_hud_toggle_key(); }
+                    #[cfg(target_os = "ios")]
+                    { config.ios.race_stat_hud_toggle_key = crate::ios::hachimi_impl::Config::default_race_stat_hud_toggle_key(); }
                 }
                 ui.end_row();
             }
@@ -6506,6 +6522,8 @@ impl ConfigEditor {
                                 { new_config.windows.race_playback_key = raw; }
                                 #[cfg(target_os = "android")]
                                 { new_config.android.race_playback_key = raw; }
+                                #[cfg(target_os = "ios")]
+                                { new_config.ios.race_playback_key = raw; }
 
                                 save_and_reload_config(new_config);
                             })));
@@ -6516,6 +6534,8 @@ impl ConfigEditor {
                     ui.label(crate::android::gui_impl::keymap::keycode_display_label(config.android.race_playback_key));
                     #[cfg(target_os = "windows")]
                     ui.label(crate::windows::utils::vk_to_display_label(config.windows.race_playback_key));
+                    #[cfg(target_os = "ios")]
+                    ui.label(format!("Key {}", config.ios.race_playback_key));
                 });
                 ui.end_row();
                 ui.label("");
@@ -6524,6 +6544,8 @@ impl ConfigEditor {
                     { config.windows.race_playback_key = crate::windows::hachimi_impl::Config::default_race_playback_key(); }
                     #[cfg(target_os = "android")]
                     { config.android.race_playback_key = crate::android::hachimi_impl::Config::default_race_playback_key(); }
+                    #[cfg(target_os = "ios")]
+                    { config.ios.race_playback_key = crate::ios::hachimi_impl::Config::default_race_playback_key(); }
                 }
                 ui.end_row();
             }
@@ -7381,6 +7403,8 @@ impl Window for FirstTimeSetupWindow {
             { self.config.windows.menu_open_key = raw; }
             #[cfg(target_os = "android")]
             { self.config.android.menu_open_key = raw; }
+            #[cfg(target_os = "ios")]
+            { self.config.ios.menu_open_key = raw; }
         }
 
         new_setup_window(ctx, self.id, t!("first_time_setup.title"))
@@ -7505,6 +7529,8 @@ impl Window for FirstTimeSetupWindow {
                             ui.label(crate::windows::utils::vk_to_display_label(self.config.windows.menu_open_key));
                             #[cfg(target_os = "android")]
                             ui.label(crate::android::gui_impl::keymap::keycode_display_label(self.config.android.menu_open_key));
+                            #[cfg(target_os = "ios")]
+                            ui.label(format!("Key {}", self.config.ios.menu_open_key));
 
                             if ui.button(t!("bind_key")).clicked() {
                                 let keybind_slot = self.pending_keybind.clone();
@@ -7521,6 +7547,8 @@ impl Window for FirstTimeSetupWindow {
                                         { new_config.windows.menu_open_key = raw; }
                                         #[cfg(target_os = "android")]
                                         { new_config.android.menu_open_key = raw; }
+                                        #[cfg(target_os = "ios")]
+                                        { new_config.ios.menu_open_key = raw; }
 
                                         save_and_reload_config(new_config);
 
@@ -7730,6 +7758,8 @@ impl ShortcutsEditWindow {
         { crate::android::gui_impl::keymap::keycode_display_label(key) }
         #[cfg(target_os = "windows")]
         { crate::windows::utils::vk_to_display_label(key as u16) }
+        #[cfg(target_os = "ios")]
+        { format!("Key {}", key) }
     }
 
     fn bind_shortcut(option: ShortcutOption, pending_binds: Arc<Mutex<Vec<(ShortcutOption, i32)>>>) {
@@ -7741,7 +7771,7 @@ impl ShortcutsEditWindow {
 
                 #[cfg(target_os = "windows")]
                 let key = raw as i32;
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", target_os = "ios"))]
                 let key = raw;
 
                 let hachimi = Hachimi::instance();

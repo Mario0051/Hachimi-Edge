@@ -68,7 +68,7 @@ extern "C" fn handle_scroll(_target: *mut AnyObject, _sel: Sel, recognizer: *mut
             if bounds.size.width > 0.0 && bounds.size.height > 0.0 {
                 if let Some(gui_mutex) = crate::core::gui::INSTANCE.get() {
                     if let Ok(mut gui) = gui_mutex.lock() {
-                        let screen_rect = gui.context.screen_rect();
+                        let screen_rect = gui.context.content_rect();
 
                         let pos = egui::pos2(
                             (location.x / bounds.size.width) as f32 * screen_rect.width(),
@@ -173,7 +173,7 @@ extern "C" fn hooked_send_event(self_obj: *mut AnyObject, sel: Sel, event: *mut 
                         if bounds.size.width > 0.0 && bounds.size.height > 0.0 {
                             if let Some(gui_mutex) = crate::core::gui::INSTANCE.get() {
                                 if let Ok(mut gui) = gui_mutex.lock() {
-                                    let screen_rect = gui.context.screen_rect();
+                                    let screen_rect = gui.context.content_rect();
 
                                     let pos = egui::pos2(
                                         (location.x / bounds.size.width) as f32 * screen_rect.width(),

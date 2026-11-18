@@ -347,6 +347,7 @@ impl Hachimi {
     }
 
     pub fn on_dlopen(&self, filename: &str, handle: usize) -> bool {
+        #[cfg(target_os = "windows")]
         let filename_lower = filename.to_lowercase();
 
         #[cfg(target_os = "windows")]
@@ -757,6 +758,16 @@ impl ShortcutOption {
         ShortcutOption::FreeCamera,
         ShortcutOption::LiveVocalsSwap
     ];
+
+    #[cfg(target_os = "windows")]
+    pub fn is_available(self) -> bool {
+        true
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn is_available(self) -> bool {
+        self != ShortcutOption::FreeCamera
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]

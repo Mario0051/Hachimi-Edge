@@ -126,13 +126,19 @@ pub struct Config {
     pub menu_open_key: i32,
     #[serde(default = "Config::default_hide_ingame_ui_hotkey_bind")]
     pub hide_ingame_ui_hotkey_bind: i32,
+    #[serde(default = "Config::default_race_stat_hud_toggle_key")]
+    pub race_stat_hud_toggle_key: i32,
+    #[serde(default = "Config::default_race_playback_key")]
+    pub race_playback_key: i32,
     #[serde(default)]
     pub load_libraries: Vec<String>,
 }
 
 impl Config {
-    fn default_menu_open_key() -> i32 { 0x4F }
-    fn default_hide_ingame_ui_hotkey_bind() -> i32 { 0x49 }
+    pub fn default_menu_open_key() -> i32 { 0x4F }
+    pub fn default_hide_ingame_ui_hotkey_bind() -> i32 { 0x49 }
+    pub fn default_race_stat_hud_toggle_key() -> i32 { 0x48 }
+    pub fn default_race_playback_key() -> i32 { 0x50 }
 }
 
 impl Default for Config {
@@ -140,6 +146,8 @@ impl Default for Config {
         Self {
             menu_open_key: Self::default_menu_open_key(),
             hide_ingame_ui_hotkey_bind: Self::default_hide_ingame_ui_hotkey_bind(),
+            race_stat_hud_toggle_key: Self::default_race_stat_hud_toggle_key(),
+            race_playback_key: Self::default_race_playback_key(),
             load_libraries: Vec::new(),
         }
     }

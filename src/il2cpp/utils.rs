@@ -261,6 +261,8 @@ pub fn umamusume_enum_options(class_name: &std::ffi::CStr) -> Vec<String> {
 const FONT_PATH_ENTRY: &str = "font_path.txt";
 #[cfg(target_os = "android")]
 const INCLUDE_ENTRY: &str = "includes_android";
+#[cfg(target_os = "ios")]
+const INCLUDE_ENTRY: &str = "includes_ios";
 #[cfg(target_os = "windows")]
 const INCLUDE_ENTRY: &str = "includes_win";
 const MAX_FONT_PATH_BYTES: u64 = 4096;

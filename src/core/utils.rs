@@ -649,7 +649,7 @@ pub fn get_masterdb_path() -> String {
 }
 
 pub fn get_meta_path() -> String {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         format!("{}/meta", get_data_path())
     }
@@ -703,7 +703,7 @@ pub fn get_proc_address(handle: usize, name: &std::ffi::CStr) -> usize {
     {
         crate::windows::utils::get_proc_address(windows::Win32::Foundation::HMODULE(handle as _), name)
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         unsafe { libc::dlsym(handle as *mut libc::c_void, name.as_ptr()) as usize }
     }
@@ -732,7 +732,7 @@ pub fn race_seek_seh<F: FnMut()>(mut f: F) -> bool {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn race_seek_seh<F: FnOnce()>(f: F) -> bool {
     f();
     true
@@ -757,6 +757,10 @@ pub fn set_clipboard_text(text: &str) -> bool {
     #[cfg(target_os = "android")]
     {
         crate::android::utils::set_clipboard_text(text)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios::utils::set_clipboard_text(text)
     }
     #[cfg(target_os = "windows")]
     {

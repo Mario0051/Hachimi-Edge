@@ -57,9 +57,9 @@ pub extern "C" fn OpenURL(url: *mut Il2CppString){
 static mut GET_PERSISTENTDATAPATH_ADDR: usize = 0;
 impl_addr_wrapper_fn!(get_persistentDataPath, GET_PERSISTENTDATAPATH_ADDR, *mut Il2CppString,);
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 static mut OPENURL_ADDR: usize = 0;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl_addr_wrapper_fn!(OpenURL, OPENURL_ADDR, (), url: *mut Il2CppString);
 
 static mut GET_SYSTEMLANGUAGE_ADDR: usize = 0;
@@ -90,7 +90,7 @@ pub fn init(UnityEngine_CoreModule: *const Il2CppImage) {
 
     unsafe {
         GET_PERSISTENTDATAPATH_ADDR = get_method_addr(Application, c"get_persistentDataPath", 0);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             OPENURL_ADDR = get_method_addr(Application, c"OpenURL", 1);
         }

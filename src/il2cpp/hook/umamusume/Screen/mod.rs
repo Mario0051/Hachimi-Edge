@@ -234,6 +234,10 @@ extern "C" fn ChangeScreenOrientation(target: ScreenOrientation, force: bool) ->
         }
         get_orig_fn!(ChangeScreenOrientation, ChangeScreenOrientationFn)(target, force)
     }
+    #[cfg(target_os = "ios")]
+    {
+        get_orig_fn!(ChangeScreenOrientation, ChangeScreenOrientationFn)(target, force)
+    }
 }
 
 #[cfg(target_os = "android")]

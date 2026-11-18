@@ -3,7 +3,9 @@ use std::{sync::{Arc, Mutex}, time::Duration};
 use rust_i18n::t;
 use serde::Deserialize;
 
-use crate::core::{gui::{HachimiUpdateWindow, NotificationGuard}, hachimi::{REPO_PATH, CODEBERG_API, GITHUB_API}, http, Error, Gui, Hachimi};
+use crate::core::{gui::NotificationGuard, hachimi::{REPO_PATH, CODEBERG_API, GITHUB_API}, http, Error, Gui};
+#[cfg(target_os = "windows")]
+use crate::core::{gui::HachimiUpdateWindow, Hachimi};
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 

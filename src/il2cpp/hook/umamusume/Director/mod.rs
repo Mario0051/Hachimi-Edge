@@ -2,7 +2,6 @@ use crate::{
     core::{game::Region, gui::IS_LIVE_SCENE, Hachimi},
     il2cpp::{
         ext::StringExt,
-        hook::UnityEngine_CoreModule::Camera,
         sql,
         symbols::{
             get_assembly_image, get_class, get_field_from_name,
@@ -11,6 +10,8 @@ use crate::{
         types::*,
     },
 };
+#[cfg(target_os = "windows")]
+use crate::il2cpp::hook::UnityEngine_CoreModule::Camera;
 use std::{
     ptr::null_mut,
     sync::atomic::{AtomicBool, Ordering},
