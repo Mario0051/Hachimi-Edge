@@ -1,7 +1,7 @@
 use crate::core::{interceptor::HookHandle, Error};
 use once_cell::sync::OnceCell;
 use std::os::raw::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 type MsHookFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut *mut c_void);
 
@@ -12,6 +12,9 @@ enum HookBackend {
 }
 
 static BACKEND: OnceCell<HookBackend> = OnceCell::new();
+static AOT_TEXT_BASE: AtomicUsize = AtomicUsize::new(0);
+static AOT_DATA_BASE: AtomicUsize = AtomicUsize::new(0);
+static AOT_HOOK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static AOT_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 pub fn is_aot_available() -> bool {
@@ -233,57 +236,86 @@ pub unsafe fn init_aot_table(base_addr: usize) {
         *(slot.add(1)) = tramp_addr;
     }
 
+    AOT_TEXT_BASE.store(text_base, Ordering::Release);
+    AOT_DATA_BASE.store(data_base, Ordering::Release);
+    AOT_HOOK_COUNT.store(hook_count, Ordering::Release);
     AOT_AVAILABLE.store(true, Ordering::Release);
 }
 
-unsafe fn hook_aot(orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
-    let insn1 = *(orig_addr as *const u32);
+unsafe fn slot_for_disp(disp_addr: usize, text_base: usize, data_base: usize, hook_count: usize) -> Option<(*mut usize, *const usize)> {
+    if text_base == 0 || disp_addr < text_base || disp_addr >= text_base + hook_count * 32 {
+        return None;
+    }
+    let idx = (disp_addr - text_base) / 32;
+    let slot_disp = text_base + idx * 32;
 
+    let disp_insn1 = *(slot_disp as *const u32);
+    let disp_insn2 = *((slot_disp + 4) as *const u32);
+    let is_adrp_x16 = (disp_insn1 & 0x9F00001F) == 0x90000010;
+    let is_add_x16 = (disp_insn2 & 0xFFC003FF) == 0x91000210;
+    if !is_adrp_x16 || !is_add_x16 {
+        return None;
+    }
+
+    let slot_addr = data_base + idx * 16;
+    Some((slot_addr as *mut usize, (slot_addr + 8) as *const usize))
+}
+
+unsafe fn resolve_aot_slot(orig_addr: usize) -> Option<(*mut usize, *const usize)> {
+    if orig_addr == 0 || (orig_addr & 3) != 0 {
+        return None;
+    }
+
+    let text_base = AOT_TEXT_BASE.load(Ordering::Acquire);
+    let data_base = AOT_DATA_BASE.load(Ordering::Acquire);
+    let hook_count = AOT_HOOK_COUNT.load(Ordering::Acquire);
+    if text_base == 0 || data_base == 0 || hook_count == 0 {
+        return None;
+    }
+
+    let insn1 = *(orig_addr as *const u32);
     if (insn1 & 0xFC000000) == 0x14000000 {
         let mut offset = (insn1 & 0x03FFFFFF) as i32;
         if (offset & 0x02000000) != 0 {
             offset |= -0x04000000;
         }
         let disp_addr = (orig_addr as i64 + (offset as i64 * 4)) as usize;
-
-        let disp_insn1 = *(disp_addr as *const u32);
-        let disp_insn2 = *((disp_addr + 4) as *const u32);
-
-        let is_adrp_x16 = (disp_insn1 & 0x9F00001F) == 0x90000010;
-        let is_add_x16 = (disp_insn2 & 0xFFC003FF) == 0x91000210;
-
-        if is_adrp_x16 && is_add_x16 {
-            let immlo = (disp_insn1 >> 29) & 3;
-            let immhi = (disp_insn1 >> 5) & 0x7FFFF;
-            let imm = (immhi << 2) | immlo;
-
-            let imm_sign_ext = if (imm & 0x100000) != 0 {
-                (imm as i64) | -0x200000
-            } else {
-                imm as i64
-            };
-
-            let page_offset = imm_sign_ext * 4096;
-            let pc_page = (disp_addr as u64) & !0xFFF;
-            let data_page = (pc_page as i64 + page_offset) as u64;
-
-            let add_imm = (disp_insn2 >> 10) & 0xFFF;
-            let data_ptr_addr = data_page + add_imm as u64;
-
-            let hook_ptr = data_ptr_addr as *mut usize;
-            let tramp_ptr = (data_ptr_addr + 8) as *const usize;
-
-            let tramp_addr = *tramp_ptr;
-            *hook_ptr = hook_addr;
-
-            info!("iOS AOT Hook successful! Orig: {:#x} -> Hook: {:#x}, Trampoline: {:#x}", orig_addr, hook_addr, tramp_addr);
-            Ok(tramp_addr)
-        } else {
-            Err(Error::HookingError(format!("Dispatcher at {:#x} is invalid", disp_addr)))
+        if let Some(slot) = slot_for_disp(disp_addr, text_base, data_base, hook_count) {
+            return Some(slot);
         }
-    } else {
-        Err(Error::HookingError(format!("Function at {:#x} was not AOT patched", orig_addr)))
     }
+
+    if let Some(slot) = slot_for_disp(orig_addr, text_base, data_base, hook_count) {
+        return Some(slot);
+    }
+
+    for i in 0..hook_count {
+        let slot_addr = data_base + i * 16;
+        let hook_ptr = slot_addr as *mut usize;
+        let tramp_ptr = (slot_addr + 8) as *const usize;
+        if *hook_ptr == orig_addr && *hook_ptr != *tramp_ptr {
+            return Some((hook_ptr, tramp_ptr));
+        }
+    }
+
+    None
+}
+
+unsafe fn hook_aot(orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
+    let (hook_ptr, tramp_ptr) = resolve_aot_slot(orig_addr)
+        .ok_or_else(|| Error::HookingError(format!("Function at {:#x} was not AOT patched", orig_addr)))?;
+
+    let prev_target = *hook_ptr;
+    if prev_target == hook_addr {
+        return Ok(*tramp_ptr);
+    }
+    *hook_ptr = hook_addr;
+
+    info!(
+        "iOS AOT Hook successful! Orig: {:#x} -> Hook: {:#x}, Next: {:#x}",
+        orig_addr, hook_addr, prev_target
+    );
+    Ok(prev_target)
 }
 
 unsafe fn hook_substrate(hook_fn: MsHookFn, orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
@@ -325,47 +357,10 @@ pub unsafe fn hook(orig_addr: usize, hook_addr: usize) -> Result<usize, Error> {
 }
 
 unsafe fn unhook_aot(hook: &HookHandle) -> Result<(), Error> {
-    let orig_addr = hook.orig_addr;
-    let insn1 = *(orig_addr as *const u32);
-
-    if (insn1 & 0xFC000000) == 0x14000000 {
-        let mut offset = (insn1 & 0x03FFFFFF) as i32;
-        if (offset & 0x02000000) != 0 {
-            offset |= -0x04000000;
-        }
-        let disp_addr = (orig_addr as i64 + (offset as i64 * 4)) as usize;
-
-        let disp_insn1 = *(disp_addr as *const u32);
-        let disp_insn2 = *((disp_addr + 4) as *const u32);
-
-        let is_adrp_x16 = (disp_insn1 & 0x9F00001F) == 0x90000010;
-        let is_add_x16 = (disp_insn2 & 0xFFC003FF) == 0x91000210;
-
-        if is_adrp_x16 && is_add_x16 {
-            let immlo = (disp_insn1 >> 29) & 3;
-            let immhi = (disp_insn1 >> 5) & 0x7FFFF;
-            let imm = (immhi << 2) | immlo;
-
-            let imm_sign_ext = if (imm & 0x100000) != 0 {
-                (imm as i64) | -0x200000
-            } else {
-                imm as i64
-            };
-
-            let page_offset = imm_sign_ext * 4096;
-            let pc_page = (disp_addr as u64) & !0xFFF;
-            let data_page = (pc_page as i64 + page_offset) as u64;
-
-            let add_imm = (disp_insn2 >> 10) & 0xFFF;
-            let data_ptr_addr = data_page + add_imm as u64;
-
-            let hook_ptr = data_ptr_addr as *mut usize;
-            let tramp_ptr = (data_ptr_addr + 8) as *const usize;
-
-            *hook_ptr = *tramp_ptr;
-            info!("iOS AOT Unhook successful! Orig: {:#x}", orig_addr);
-            return Ok(());
-        }
+    if let Some((hook_ptr, tramp_ptr)) = resolve_aot_slot(hook.orig_addr) {
+        *hook_ptr = *tramp_ptr;
+        info!("iOS AOT Unhook successful! Orig: {:#x}", hook.orig_addr);
+        return Ok(());
     }
 
     let _ = dobby_rs::unhook(hook.orig_addr as *mut c_void);
